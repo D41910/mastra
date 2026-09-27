@@ -1012,6 +1012,7 @@ export function createDurableToolCallStep() {
       const toolOptions = {
         toolCallId,
         messages: [],
+        getMessages: messageList ? () => messageList.get.all.db() : undefined,
         workspace,
         requestContext,
         mcp: registryEntry?.mcp,

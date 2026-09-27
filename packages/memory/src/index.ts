@@ -2824,6 +2824,10 @@ Notes:
       tools.recall = recallTool(mergedConfig, {
         retrievalScope,
         searchEnabled: this.hasRetrievalSearch(omConfig.retrieval),
+        getOMEngine: async () => {
+          const om = await this.omEngine;
+          return om?.getStorage().supportsObservationalMemoryHistorySearch ? om : null;
+        },
       });
     }
     if (
