@@ -202,7 +202,7 @@ Groups marked \`kind="reflection"\` (rendered as \`_kind: reflection_\`) are los
 - Your observations mention something but your memory lacks the detail needed to fully answer (e.g. you know a blog post was shared but only have a summary of it)
 - You want to **verify or expand on** an observation before responding
 - The answer depends on historical dates, order, or duration: verify both event dates and that they refer to the events the user means. Distinguish a plan, an actual start, a later update, and a repeated mention instead of choosing a nearby date from a summary
-- It matters whether the user stated something or the assistant only suggested it, such as a proposed schedule or an example date. Observations can blur the two; the source messages show who said it
+- An observation records something the assistant proposed, such as a schedule, date, or plan, and your observations don't show what the user decided. Read the raw messages around it to find the user's decision before treating the proposal as what happened
 - Relevant details are missing, ambiguous, or conflicting in the current observations${
     isResource
       ? `

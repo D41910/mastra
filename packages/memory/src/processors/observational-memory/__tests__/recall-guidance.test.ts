@@ -16,14 +16,16 @@ describe('who said it', () => {
     expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain('unless the user adopted or confirmed them');
   });
 
-  it.each(['thread', 'resource'] as const)('sends ambiguous authorship to source messages in %s scope', scope => {
-    expect(getRetrievalInstructions(scope)).toContain(
-      'whether the user stated something or the assistant only suggested it',
-    );
-    expect(getRetrievalInstructions(scope, undefined, false)).toContain(
-      'whether the user stated something or the assistant only suggested it',
-    );
-  });
+  it.each(['thread', 'resource'] as const)(
+    'sends unconfirmed assistant proposals to raw messages in %s scope',
+    scope => {
+      for (const text of [getRetrievalInstructions(scope), getRetrievalInstructions(scope, undefined, false)]) {
+        expect(text).toContain('An observation records something the assistant proposed');
+        expect(text).toContain("your observations don't show what the user decided");
+        expect(text).toContain("Read the raw messages around it to find the user's decision");
+      }
+    },
+  );
 });
 
 describe('actor recall guidance', () => {
