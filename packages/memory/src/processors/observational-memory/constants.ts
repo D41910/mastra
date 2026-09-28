@@ -177,7 +177,7 @@ If search still finds nothing useful, browse raw messages${isResource ? ' or dis
     ? `### Paging original observations
 Use \`mode: "observations"\` around a relevant search hit to fill in missing details, check earlier or later events, and recover context omitted from a reflection or search result.
 
-- Copy the hit's \`groupId\`${isResource ? ' and \`threadId\`' : ''}. Omit \`direction\` to read the full anchor group and following groups, including text truncated in search.
+- Copy the hit's \`groupId\`${isResource ? ', \`threadId\`,' : ''} and, when shown, its \`record\` as \`recordId\`. Omit \`direction\` to read the full anchor group and following groups, including text truncated in search.
 - Use \`direction: "before"\` or \`direction: "after"\` to read groups strictly before or after that anchor. Pages contain 5 groups by default; \`limit\` allows up to 20. Dense groups can be large; use \`limit: 1\` or \`limit: 2\` for a quick skim.
 - Follow the returned continuation calls, using the first or last group ID on each page as the next anchor. \`groupId\` is an observation cursor; \`cursor\` is a raw message ID. Do not interchange them.
 - \`hasMore\` reports whether more groups exist in the requested direction (after when direction is omitted). A full page can still have \`hasMore: false\`; stop in that direction without making an empty follow-up call. Explicit start/end markers describe retained observation history, not whether older raw messages exist. When newer messages have not been observed yet, the end marker says how many and gives the \`mode: "messages"\` call that reads them.

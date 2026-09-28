@@ -1729,6 +1729,10 @@ export class MemoryLibSQL extends MemoryStorage {
       const conditions = [`"lookupKey" = ?`];
       const args: InValue[] = [lookupKey];
 
+      if (options?.recordId !== undefined) {
+        conditions.push(`id = ?`);
+        args.push(options.recordId);
+      }
       if (options?.from) {
         conditions.push(`"createdAt" >= ?`);
         args.push(options.from.toISOString());

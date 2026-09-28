@@ -434,6 +434,7 @@ export class ConvexDB extends MastraBase {
     to?: string;
     offset?: number;
     groupId?: string;
+    recordId?: string;
     beforeGeneration?: number;
     afterGeneration?: number;
     sortDirection?: 'ASC' | 'DESC';

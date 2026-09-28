@@ -1227,6 +1227,8 @@ export interface ObservationalMemoryHistoryOptions {
   afterGeneration?: number;
   /** Generation ordering. Defaults to DESC (newest first). */
   sortDirection?: 'ASC' | 'DESC';
+  /** Only return the record with this ID, if it belongs to the requested thread or resource. */
+  recordId?: string;
 }
 
 export interface ObservationalMemoryRecord {

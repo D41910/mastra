@@ -244,6 +244,18 @@ export function createObservationalMemoryTest({ storage }: { storage: MastraStor
             groupId,
           }),
         ).toEqual([]);
+
+        const byId = (options: { recordId: string; groupId?: string }) =>
+          memoryStorage.getObservationalMemoryHistory(threadId, resourceId, 1, options);
+        expect((await byId({ recordId: second.id })).map(r => r.id)).toEqual([second.id]);
+        expect((await byId({ recordId: second.id, groupId })).map(r => r.id)).toEqual([second.id]);
+        expect(await byId({ recordId: first.id, groupId })).toEqual([]);
+        expect(await byId({ recordId: randomUUID() })).toEqual([]);
+        expect(
+          await memoryStorage.getObservationalMemoryHistory(scope === 'thread' ? randomUUID() : null, randomUUID(), 1, {
+            recordId: second.id,
+          }),
+        ).toEqual([]);
       });
 
       it('should return empty array for non-existent resource', async () => {

@@ -2298,6 +2298,10 @@ export class MemoryPG extends MemoryStorage {
       const params: unknown[] = [lookupKey];
       let paramIndex = 2;
 
+      if (options?.recordId !== undefined) {
+        conditions.push(`id = $${paramIndex++}`);
+        params.push(options.recordId);
+      }
       if (options?.from) {
         conditions.push(`"createdAtZ" >= $${paramIndex}`);
         params.push(options.from.toISOString());

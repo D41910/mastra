@@ -221,4 +221,11 @@ describe('actor recall guidance', () => {
       );
     }
   }
+  it.each(['thread', 'resource'] as const)(
+    'tells the agent to copy record IDs into paging calls in %s scope',
+    scope => {
+      const text = getRetrievalInstructions(scope, undefined, true, true);
+      expect(text).toContain('its `record` as `recordId`');
+    },
+  );
 });

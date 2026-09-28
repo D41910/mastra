@@ -173,6 +173,18 @@ describe('recall observations integration', () => {
     );
     expect(result.results).not.toMatch(/\d+\+? observation groups hidden/);
   });
+  it('prints record IDs so paging can skip the history scan', async () => {
+    const { memory, om } = setup();
+    const search = memory.searchMessages!;
+    memory.searchMessages = async input => ({
+      results: (await search(input)).results.map(hit => ({ ...hit, recordId: `record-${hit.groupId}` })),
+    });
+    const result = await searchMessagesForResource({ memory, om, resourceId: 'resource', query: 'x', topK: 2 });
+    expect(result.results).toContain('- observation group: a\n- record: record-a\n');
+    expect(result.results).toContain(
+      'continue with recall({"mode":"observations","threadId":"thread","groupId":"a","direction":"after","recordId":"record-a"})',
+    );
+  });
   it('reads observational memory history at most once per search, however many hits', async () => {
     const { memory, om } = setup();
     const result = await searchMessagesForResource({

@@ -788,6 +788,9 @@ export class InMemoryMemory extends MemoryStorage {
     const key = this.getObservationalMemoryKey(threadId, resourceId);
     let records = this.db.observationalMemory.get(key) ?? [];
 
+    if (options?.recordId !== undefined) {
+      records = records.filter(r => r.id === options.recordId);
+    }
     if (options?.from) {
       records = records.filter(r => r.createdAt >= options.from!);
     }

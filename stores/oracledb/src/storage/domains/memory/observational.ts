@@ -161,6 +161,10 @@ export async function getObservationalMemoryHistory(
     const conditions = [`${OM_LOOKUP_KEY} = :lookupKey`];
     const binds: Record<string, unknown> = { lookupKey, limit };
 
+    if (options?.recordId !== undefined) {
+      conditions.push(`id = :recordId`);
+      binds.recordId = options.recordId;
+    }
     if (options?.from) {
       conditions.push(`${OM_CREATED_AT} >= :fromDate`);
       binds.fromDate = options.from;

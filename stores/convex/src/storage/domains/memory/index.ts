@@ -928,6 +928,7 @@ export class MemoryConvex extends MemoryStorage {
       to: options?.to ? options.to.toISOString() : undefined,
       offset: options?.offset ?? undefined,
       groupId: options?.groupId,
+      recordId: options?.recordId,
       beforeGeneration: options?.beforeGeneration,
       afterGeneration: options?.afterGeneration,
       sortDirection: options?.sortDirection,

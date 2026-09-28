@@ -18,11 +18,12 @@ function history(records: OMGenerationRecord[]) {
     records
       .filter(
         r =>
-          options?.groupId === undefined ||
-          r.activeObservations.includes(`<observation-group id="${options.groupId}"`) ||
-          r.bufferedObservationChunks?.some(chunk =>
-            chunk.observations.includes(`<observation-group id="${options.groupId}"`),
-          ),
+          (options?.recordId === undefined || r.id === options.recordId) &&
+          (options?.groupId === undefined ||
+            r.activeObservations.includes(`<observation-group id="${options.groupId}"`) ||
+            r.bufferedObservationChunks?.some(chunk =>
+              chunk.observations.includes(`<observation-group id="${options.groupId}"`),
+            )),
       )
       .filter(r => options?.beforeGeneration === undefined || r.generationCount < options.beforeGeneration)
       .filter(r => options?.afterGeneration === undefined || r.generationCount > options.afterGeneration)
@@ -237,5 +238,37 @@ describe('observation group history', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  describe('record hints', () => {
+    const scan = (groupId: string) => ['thread', 'resource', 1, { groupId, sortDirection: 'ASC' }];
+    it('reads the hinted record instead of scanning the history', async () => {
+      const om = history(generations());
+      const page = await pageObservationGroups({ om, ...args, groupId: 'e', recordId: 'generation-1' });
+      expect(ids(page.results)).toEqual(['e', 'f', 'g']);
+      expect(om.getHistory).toHaveBeenNthCalledWith(1, 'thread', 'resource', 1, {
+        recordId: 'generation-1',
+        groupId: 'e',
+      });
+      expect(om.getHistory).not.toHaveBeenCalledWith(...scan('e'));
+    });
+    it('falls back to the scan when the hinted record does not hold the group', async () => {
+      const om = history(generations());
+      for (const recordId of ['generation-2', 'deleted-record']) {
+        const page = await pageObservationGroups({ om, ...args, groupId: 'a', recordId });
+        expect(ids(page.results)).toEqual(['a', 'b', 'c']);
+      }
+      expect(om.getHistory).toHaveBeenCalledWith(...scan('a'));
+    });
+    it('puts the record holding each edge group in continuation calls', async () => {
+      const om = history(generations());
+      const page = await pageObservationGroups({ om, ...args, groupId: 'c' });
+      expect(ids(page.results)).toEqual(['c', 'd', 'e']);
+      expect(page.results).toContain(
+        'recall({"mode":"observations","threadId":"thread","groupId":"c","direction":"before","recordId":"generation-0"})',
+      );
+      expect(page.results).toContain(
+        'recall({"mode":"observations","threadId":"thread","groupId":"e","direction":"after","recordId":"generation-1"})',
+      );
+    });
   });
 });

@@ -50,15 +50,26 @@ export async function findGroupTimeline(
   threadId: string,
   resourceId: string,
   groupId: string,
+  recordId?: string,
 ): Promise<GroupTimeline | null> {
-  const [record] = await om.getHistory(threadId, resourceId, 1, { groupId, sortDirection: 'ASC' });
-  if (!record || (record.threadId !== null && record.threadId !== threadId)) return null;
-  const timeline = await buildTimeline(record, threadId);
-  return timeline.indexById.has(groupId) ? timeline : null;
+  const resolve = async (options: ObservationalMemoryHistoryOptions) => {
+    const [record] = await om.getHistory(threadId, resourceId, 1, { ...options, groupId });
+    if (!record || (record.threadId !== null && record.threadId !== threadId)) return null;
+    const timeline = await buildTimeline(record, threadId);
+    return timeline.indexById.has(groupId) ? timeline : null;
+  };
+  // A record hint is a primary-key read. Scanning every generation for the group is the fallback
+  // for groups indexed without one, stale hints, and adapters that ignore the option.
+  return (recordId !== undefined && (await resolve({ recordId }))) || (await resolve({ sortDirection: 'ASC' }));
 }
 
-export function pagingCall(groupId: string, direction: 'before' | 'after', threadId?: string): string {
-  return `recall(${JSON.stringify({ mode: 'observations', threadId, groupId, direction })})`;
+export function pagingCall(
+  groupId: string,
+  direction: 'before' | 'after',
+  threadId?: string,
+  recordId?: string,
+): string {
+  return `recall(${JSON.stringify({ mode: 'observations', threadId, groupId, direction, recordId })})`;
 }
 
 /** Messages after the last observed range are raw history only; say so instead of implying the thread ends. */
@@ -83,6 +94,7 @@ export async function pageObservationGroups({
   threadId,
   resourceId,
   groupId,
+  recordId,
   direction: requestedDirection,
   limit,
   threadTitle,
@@ -93,6 +105,8 @@ export async function pageObservationGroups({
   threadId: string;
   resourceId: string;
   groupId: string;
+  /** Record that holds the group, from a search hit or continuation call. */
+  recordId?: string;
   direction?: 'before' | 'after';
   limit: number;
   threadTitle?: string;
@@ -100,7 +114,7 @@ export async function pageObservationGroups({
   /** Counts the thread's messages created after the given message ID. */
   countNewerMessages?: (cursor: string) => Promise<number>;
 }): Promise<{ results: string; count: number; hasMore?: boolean }> {
-  const home = await findGroupTimeline(om, threadId, resourceId, groupId);
+  const home = await findGroupTimeline(om, threadId, resourceId, groupId, recordId);
   if (!home)
     return {
       results: `No original observation group ${JSON.stringify(groupId)} was found in the active or buffered observations of thread ${JSON.stringify(threadId)} across its retained history. Check the threadId and groupId from the search hit, or use mode="messages" with a message ID from its source range.`,
@@ -174,18 +188,27 @@ export async function pageObservationGroups({
       : requestedDirection !== undefined ||
         home.indexById.get(groupId)! > 0 ||
         (home.record.generationCount > 0 &&
-          (await pageObservationGroups({ om, threadId, resourceId, groupId, direction: 'before', limit: 1 })).count >
-            0);
+          (
+            await pageObservationGroups({
+              om,
+              threadId,
+              resourceId,
+              groupId,
+              recordId: home.record.id,
+              direction: 'before',
+              limit: 1,
+            })
+          ).count > 0);
   const hasLater = direction === 'before' || hasMore;
   const newer = hasLater ? null : await newerMessagesNote(page.at(-1)!.group, countNewerMessages, pagingThreadId);
   text.unshift(
     hasEarlier
-      ? `— Browse earlier: ${pagingCall(page[0]!.group.id, 'before', pagingThreadId)} —`
+      ? `— Browse earlier: ${pagingCall(page[0]!.group.id, 'before', pagingThreadId, page[0]!.record.id)} —`
       : '— Start of retained observation history for this thread. —',
   );
   text.push(
     hasLater
-      ? `— Browse later: ${pagingCall(page.at(-1)!.group.id, 'after', pagingThreadId)} —`
+      ? `— Browse later: ${pagingCall(page.at(-1)!.group.id, 'after', pagingThreadId, page.at(-1)!.record.id)} —`
       : newer
         ? `— End of observation history for this thread. ${newer} —`
         : '— End of retained observation history for this thread. —',

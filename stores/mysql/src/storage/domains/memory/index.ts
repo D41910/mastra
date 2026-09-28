@@ -1890,6 +1890,10 @@ export class MemoryMySQL extends MemoryStorage {
       const conditions: string[] = [`${omCol('lookupKey')} = ?`];
       const params: any[] = [lookupKey];
 
+      if (options?.recordId !== undefined) {
+        conditions.push(`${omCol('id')} = ?`);
+        params.push(options.recordId);
+      }
       if (options?.from) {
         conditions.push(`${omCol('createdAt')} >= ?`);
         params.push(transformToSqlValue(options.from));

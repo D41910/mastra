@@ -1550,6 +1550,7 @@ export class MemoryStorageMongoDB extends MemoryStorage {
       const collection = await this.getCollection(OM_TABLE);
 
       const filter: Record<string, unknown> = { lookupKey };
+      if (options?.recordId !== undefined) filter['id'] = options.recordId;
       if (options?.from || options?.to) {
         const createdAtFilter: Record<string, unknown> = {};
         if (options.from) createdAtFilter['$gte'] = options.from;

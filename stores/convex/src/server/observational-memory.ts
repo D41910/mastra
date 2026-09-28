@@ -216,11 +216,16 @@ export async function handleObservationalMemoryOperation(
     }
 
     case 'omGetHistory': {
-      let docs = await ctx.db
-        .query(convexTable)
-        .withIndex('by_lookup_key', (q: any) => q.eq('lookupKey', request.lookupKey))
-        .order('desc')
-        .collect();
+      let docs =
+        request.recordId !== undefined
+          ? [await findRecordById(ctx, convexTable, request.recordId)].filter(
+              (doc: any) => doc?.lookupKey === request.lookupKey,
+            )
+          : await ctx.db
+              .query(convexTable)
+              .withIndex('by_lookup_key', (q: any) => q.eq('lookupKey', request.lookupKey))
+              .order('desc')
+              .collect();
 
       // createdAt is a UTC ISO string, so lexicographic comparison is chronological.
       if (request.from) {
