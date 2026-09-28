@@ -84,6 +84,8 @@ export const OBSERVATION_CONTEXT_INSTRUCTIONS = `IMPORTANT: When responding, ref
 
 KNOWLEDGE UPDATES: When asked about current state (e.g., "where do I currently...", "what is my current..."), always prefer the MOST RECENT information. Observations include dates - if you see conflicting information, the newer observation supersedes the older one. Look for phrases like "will start", "is switching", "changed to", "moved to" as indicators that previous information has been updated.
 
+USER STATEMENTS VS ASSISTANT SUGGESTIONS: Treat what the user said about their own life, plans, decisions, and dates as authoritative, unless data or their own later messages say otherwise. Treat what the assistant said, such as proposed schedules, example dates, and recommendations, as suggestions rather than facts about what happened, unless the user adopted or confirmed them.
+
 PLANNED ACTIONS: If the user stated they planned to do something (e.g., "I'm going to...", "I'm looking forward to...", "I will...") and the date they planned to do it is now in the past (check the relative time like "3 weeks ago"), assume they completed the action unless there's evidence they didn't. For example, if someone said "I'll start my new diet on Monday" and that was 2 weeks ago, assume they started the diet.
 
 MOST RECENT USER INPUT: Treat the most recent user message as the highest-priority signal for what to do next. Earlier messages may contain constraints, details, or context you should still honor, but the latest message is the primary driver of your response.
@@ -200,6 +202,7 @@ Groups marked \`kind="reflection"\` (rendered as \`_kind: reflection_\`) are los
 - Your observations mention something but your memory lacks the detail needed to fully answer (e.g. you know a blog post was shared but only have a summary of it)
 - You want to **verify or expand on** an observation before responding
 - The answer depends on historical dates, order, or duration: verify both event dates and that they refer to the events the user means. Distinguish a plan, an actual start, a later update, and a repeated mention instead of choosing a nearby date from a summary
+- It matters whether the user stated something or the assistant only suggested it, such as a proposed schedule or an example date. Observations can blur the two; the source messages show who said it
 - Relevant details are missing, ambiguous, or conflicting in the current observations${
     isResource
       ? `

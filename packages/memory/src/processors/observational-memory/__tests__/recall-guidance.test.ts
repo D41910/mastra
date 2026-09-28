@@ -3,11 +3,28 @@ import { MessageList } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
 import { InMemoryDB, InMemoryMemory } from '@mastra/core/storage';
 import { describe, expect, it, vi } from 'vitest';
-import { getRetrievalInstructions } from '../constants';
+import { getRetrievalInstructions, OBSERVATION_CONTEXT_INSTRUCTIONS } from '../constants';
 import { renderObservationGroupsForReflection } from '../observation-groups';
 import { ObservationalMemory } from '../observational-memory';
 import { ObservationalMemoryProcessor } from '../processor';
 import type { MemoryContextProvider } from '../processor';
+
+describe('who said it', () => {
+  it('treats user statements as authoritative and assistant messages as suggestions', () => {
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain('USER STATEMENTS VS ASSISTANT SUGGESTIONS');
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain('unless data or their own later messages say otherwise');
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain('unless the user adopted or confirmed them');
+  });
+
+  it.each(['thread', 'resource'] as const)('sends ambiguous authorship to source messages in %s scope', scope => {
+    expect(getRetrievalInstructions(scope)).toContain(
+      'whether the user stated something or the assistant only suggested it',
+    );
+    expect(getRetrievalInstructions(scope, undefined, false)).toContain(
+      'whether the user stated something or the assistant only suggested it',
+    );
+  });
+});
 
 describe('actor recall guidance', () => {
   it.each(['thread', 'resource'] as const)('teaches search-to-observation paging in %s scope', scope => {
