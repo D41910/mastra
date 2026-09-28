@@ -1,7 +1,6 @@
-import { isDeepStrictEqual } from 'node:util';
 import type { MastraDBMessage } from '@mastra/core/agent';
 import { resolveToolResultValue } from '../processors/observational-memory/tool-result-helpers';
-import type { RecallMemory, RecallSearchResult } from './om-tools';
+import type { RecallSearchResult } from './om-tools';
 
 export function searchContextKey(match: Pick<RecallSearchResult, 'threadId' | 'groupId'>): string {
   return JSON.stringify([match.threadId, match.groupId]);
@@ -41,58 +40,17 @@ export function getVisibleSearchExcerpts(messages: readonly MastraDBMessage[]): 
   return excerpts;
 }
 
-function visibleParts(message: MastraDBMessage) {
-  return message.content.parts.filter(part => !part.type.startsWith('data-') && part.type !== 'step-start');
-}
-
-export async function sourceRangeIsVisible({
+export function sourceRangeOverlapsContext({
   match,
   messages,
-  memory,
-  resourceId,
 }: {
   match: RecallSearchResult;
   messages: readonly MastraDBMessage[];
-  memory: Pick<RecallMemory, 'recall'>;
-  resourceId: string;
-}): Promise<boolean> {
+}): boolean {
   if (!match.groupId || !match.range) return false;
   const endpoints = /^([^:,]+):([^:,]+)$/.exec(match.range);
   if (!endpoints) return false;
-  const byId = new Map(
-    messages.filter(message => message.threadId === match.threadId).map(message => [message.id, message]),
+  return messages.some(
+    message => message.threadId === match.threadId && (message.id === endpoints[1] || message.id === endpoints[2]),
   );
-  const start = byId.get(endpoints[1]!);
-  const end = byId.get(endpoints[2]!);
-  if (!start || !end || start.createdAt > end.createdAt) return false;
-
-  // Endpoints alone cannot prove coverage: processors may have removed messages in between.
-  // Bound the read by the current context size; an incomplete window cannot justify suppression.
-  const history = await memory.recall({
-    threadId: match.threadId,
-    resourceId,
-    page: 0,
-    perPage: byId.size + 1,
-    orderBy: { field: 'createdAt', direction: 'ASC' },
-    filter: { dateRange: { start: start.createdAt, end: end.createdAt } },
-  });
-  if (history.hasMore) return false;
-  const first = history.messages.findIndex(message => message.id === start.id);
-  const last = history.messages.findIndex(message => message.id === end.id);
-  if (first < 0 || last < first) return false;
-  return history.messages.slice(first, last + 1).every(source => {
-    const current = byId.get(source.id);
-    if (!current || current.role !== source.role || source.threadId !== match.threadId) return false;
-    const sourceParts = visibleParts(source);
-    const currentParts = visibleParts(current);
-    if (!sourceParts.length) return false;
-    let position = 0;
-    return sourceParts.every(part => {
-      const index = currentParts.findIndex(
-        (candidate, index) => index >= position && isDeepStrictEqual(candidate, part),
-      );
-      position = index + 1;
-      return index >= 0;
-    });
-  });
 }

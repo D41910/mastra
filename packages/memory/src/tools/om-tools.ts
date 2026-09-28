@@ -17,7 +17,7 @@ import {
 } from '../processors/observational-memory/tool-result-helpers';
 import { findGroupTimeline, gapMarkerBetween, pageObservationGroups, pagingCall } from './om-observations';
 import type { OMTimelineEngine } from './om-observations';
-import { getVisibleSearchExcerpts, searchContextKey, sourceRangeIsVisible } from './om-search-context';
+import { getVisibleSearchExcerpts, searchContextKey, sourceRangeOverlapsContext } from './om-search-context';
 
 export type RecallDetail = 'low' | 'high';
 
@@ -354,16 +354,12 @@ export async function searchMessagesForResource({
   const beforeDate = before ? new Date(before) : undefined;
   const afterDate = after ? new Date(after) : undefined;
 
-  const { results } = await memory.searchMessages({
-    query,
-    resourceId,
-    topK: searchTopK,
-    filter: {
-      ...(threadScope ? { threadId: threadScope } : {}),
-      ...(afterDate ? { observedAfter: afterDate } : {}),
-      ...(beforeDate ? { observedBefore: beforeDate } : {}),
-    },
-  });
+  const filter = {
+    ...(threadScope ? { threadId: threadScope } : {}),
+    ...(afterDate ? { observedAfter: afterDate } : {}),
+    ...(beforeDate ? { observedBefore: beforeDate } : {}),
+  };
+  const { results } = await memory.searchMessages({ query, resourceId, topK: searchTopK, filter });
 
   if (results.length === 0) {
     return {
@@ -383,12 +379,13 @@ export async function searchMessagesForResource({
     );
   }
 
-  const filteredMatches = results.filter(match => {
+  const matchesFilter = (match: RecallSearchResult) => {
     if (threadScope && match.threadId !== threadScope) return false;
     if (beforeDate && match.observedAt && match.observedAt >= beforeDate) return false;
     if (afterDate && match.observedAt && match.observedAt <= afterDate) return false;
     return true;
-  });
+  };
+  const filteredMatches = results.filter(matchesFilter);
 
   if (filteredMatches.length === 0) {
     return { results: 'No matching messages found.', count: 0 };
@@ -398,52 +395,103 @@ export async function searchMessagesForResource({
   const contentBudget = Math.max(0, Math.floor(maxTokens));
   const perGroupBudget = Math.floor(contentBudget / limitedMatches.length);
   const now = new Date();
+  const terms = excerptQueryTerms(query);
+  const setExcerpt = (entry: { body: string; excerpt: string; excerptContent: string }, budget: number) => {
+    const selected = selectSearchExcerpt(entry.body, terms, budget);
+    entry.excerpt = selected.text;
+    entry.excerptContent = selected.content;
+  };
 
   // Reserve an excerpt for every hit before distributing spare space in similarity order.
   // Metadata and navigation do not consume the observation-text allowance.
-  const ordered = await Promise.all(
-    limitedMatches.map(async (match, index) => {
-      const timeline =
-        om && match.groupId && threadMap.get(match.threadId)?.resourceId === resourceId
-          ? await findGroupTimeline(om, match.threadId, resourceId, match.groupId)
-          : null;
-      const timeZone = resolveTimeZone(timeline?.record.observedTimezone ?? undefined);
-      const rawBody = (match.text || '').trim() || '_Observation text unavailable._';
-      const body = match.groupId ? addRelativeTimeToObservations(rawBody, now, timeZone) : rawBody;
-      return { match, index, timeline, body, excerpt: chunkTextByTokens(body, perGroupBudget).text, suppression: '' };
-    }),
-  );
+  const prepareEntry = async (match: RecallSearchResult, index: number, budget: number) => {
+    const timeline =
+      om && match.groupId && threadMap.get(match.threadId)?.resourceId === resourceId
+        ? await findGroupTimeline(om, match.threadId, resourceId, match.groupId)
+        : null;
+    const timeZone = resolveTimeZone(timeline?.record.observedTimezone ?? undefined);
+    const rawBody = (match.text || '').trim() || '_Observation text unavailable._';
+    const body = match.groupId ? addRelativeTimeToObservations(rawBody, now, timeZone) : rawBody;
+    const entry = { match, index, timeline, body, excerpt: '', excerptContent: '', suppression: '' };
+    setExcerpt(entry, budget);
+    return entry;
+  };
+  const ordered = await Promise.all(limitedMatches.map((match, index) => prepareEntry(match, index, perGroupBudget)));
   let remaining = contentBudget - ordered.reduce((sum, entry) => sum + estimateTokenCount(entry.excerpt), 0);
   for (const entry of ordered) {
     if (remaining <= 0) break;
     if (entry.excerpt === entry.body) continue;
     const previousTokens = estimateTokenCount(entry.excerpt);
-    entry.excerpt = chunkTextByTokens(entry.body, previousTokens + remaining).text;
+    setExcerpt(entry, previousTokens + remaining);
     remaining -= estimateTokenCount(entry.excerpt) - previousTokens;
   }
 
   const visibleExcerpts = getVisibleSearchExcerpts(currentMessages);
-  await Promise.all(
-    ordered.map(async entry => {
-      if (!entry.match.groupId) return;
-      if (
-        entry.excerpt &&
-        visibleExcerpts.get(searchContextKey(entry.match))?.some(text => text.startsWith(entry.excerpt))
-      ) {
-        entry.suppression = 'Excerpt already in current context.';
-      } else if (await sourceRangeIsVisible({ match: entry.match, messages: currentMessages, memory, resourceId })) {
-        entry.suppression = 'Source messages already in current context.';
+  const suppressCoveredEntry = (entry: (typeof ordered)[number]) => {
+    if (!entry.match.groupId) return;
+    if (
+      entry.excerptContent &&
+      visibleExcerpts.get(searchContextKey(entry.match))?.some(text => text.includes(entry.excerptContent))
+    ) {
+      entry.suppression = 'Excerpt already in current context.';
+    } else if (sourceRangeOverlapsContext({ match: entry.match, messages: currentMessages })) {
+      entry.suppression = 'Source range overlaps current context.';
+    }
+    if (entry.suppression) {
+      entry.excerpt = '';
+      entry.excerptContent = '';
+    }
+  };
+  ordered.forEach(suppressCoveredEntry);
+
+  let freshCount = ordered.filter(entry => !entry.suppression).length;
+  if (freshCount < ordered.length && contentBudget > 0) {
+    // Reserve space for the requested fresh-hit count before filling empty slots.
+    // An initial pool shortened by vector-group deduplication may have spent it all.
+    const backfillBudget = Math.floor(contentBudget / clampedTopK);
+    for (const entry of ordered) {
+      if (entry.suppression) continue;
+      setExcerpt(entry, backfillBudget);
+      suppressCoveredEntry(entry);
+    }
+    freshCount = ordered.filter(entry => !entry.suppression).length;
+    // At most one deeper query, independent of thread/date overfetch. Vector chunks
+    // may collapse into fewer groups, so a short first result is not exhaustion.
+    const candidateLimit = Math.max(searchTopK, Math.min(100, clampedTopK * 5));
+    const candidateKey = (match: RecallSearchResult) =>
+      match.groupId ? searchContextKey(match) : JSON.stringify([match.threadId, match.range, match.text]);
+    const seen = new Set(ordered.map(entry => candidateKey(entry.match)));
+    const addCandidates = async (candidates: RecallSearchResult[]) => {
+      for (const match of candidates.slice(0, candidateLimit)) {
+        if (freshCount >= clampedTopK || seen.size >= candidateLimit) break;
+        if (!matchesFilter(match)) continue;
+        const key = candidateKey(match);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!threadMap.has(match.threadId) && memory.getThreadById) {
+          const thread = await memory.getThreadById({ threadId: match.threadId });
+          if (thread) threadMap.set(match.threadId, thread);
+        }
+        const entry = await prepareEntry(match, ordered.length, backfillBudget);
+        suppressCoveredEntry(entry);
+        ordered.push(entry);
+        if (!entry.suppression) freshCount++;
       }
-      if (entry.suppression) entry.excerpt = '';
-    }),
-  );
+    };
+    await addCandidates(filteredMatches.slice(limitedMatches.length));
+    if (freshCount < clampedTopK && seen.size < candidateLimit && searchTopK < candidateLimit) {
+      const deeper = await memory.searchMessages({ query, resourceId, topK: candidateLimit, filter });
+      await addCandidates(deeper.results);
+    }
+  }
+
   // Reuse the space from compact references without making a previously covered excerpt longer.
   remaining = contentBudget - ordered.reduce((sum, entry) => sum + estimateTokenCount(entry.excerpt), 0);
   for (const entry of ordered) {
     if (remaining <= 0) break;
     if (entry.suppression || entry.excerpt === entry.body) continue;
     const previousTokens = estimateTokenCount(entry.excerpt);
-    entry.excerpt = chunkTextByTokens(entry.body, previousTokens + remaining).text;
+    setExcerpt(entry, previousTokens + remaining);
     remaining -= estimateTokenCount(entry.excerpt) - previousTokens;
   }
 
@@ -465,6 +513,13 @@ export async function searchMessagesForResource({
   const timelines = ordered.map(entry => entry.timeline);
 
   const sections: string[] = [];
+  const compactCount = ordered.length - freshCount;
+  if (compactCount > 0) {
+    sections.push(
+      `Showing ${freshCount} excerpts and ${compactCount} already-in-context references.` +
+        (freshCount < clampedTopK ? ' Backfill is bounded; fewer excerpts do not mean history is exhausted.' : ''),
+    );
+  }
   for (let i = 0; i < ordered.length; i++) {
     const { match, body, excerpt, suppression } = ordered[i]!;
     const timeline = timelines[i]!;
@@ -568,7 +623,7 @@ export async function searchMessagesForResource({
 
   return {
     results: sections.join('\n\n'),
-    count: limitedMatches.length,
+    count: ordered.length,
   };
 }
 
@@ -646,6 +701,52 @@ function chunkTextByTokens(
     nextCharOffset,
     truncated: nextCharOffset < text.length,
   };
+}
+
+const EXCERPT_STOP_WORDS = new Set(
+  'the and for with that this from have has had what when where which while who whom why how many much did does was were are you your our their them they there been being some also just than then those these its into about any all can could would should not but user agent asked said mention mentioned total'.split(
+    ' ',
+  ),
+);
+
+function excerptQueryTerms(query: string): string[] {
+  const words = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return [...new Set(words.filter(word => word.length >= 3 && !EXCERPT_STOP_WORDS.has(word)))];
+}
+
+const EXCERPT_OMISSION_MARKER = '[earlier lines omitted]';
+
+/**
+ * Fit an observation to a token budget. When it does not fit, start at the observation
+ * line matching the most query terms (keeping that line's date header) instead of the head,
+ * so repeated searches can reach text a head-only excerpt would never show.
+ * `content` is the slice of the body that is shown, used to recognize excerpts already in context.
+ */
+function selectSearchExcerpt(body: string, terms: string[], maxTokens: number): { text: string; content: string } {
+  const head = chunkTextByTokens(body, maxTokens);
+  if (!head.truncated || terms.length === 0) return { text: head.text, content: head.text };
+
+  // Observation lines begin with a date header or a bullet; vector chunks may join them on one line.
+  const starts = [0, ...[...body.matchAll(/(?<=\s)(?:Date: |\* )/g)].map(match => match.index)];
+  let best: { start: number; end: number; score: number } | undefined;
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i]!;
+    const end = starts[i + 1] ?? body.length;
+    const line = body.slice(start, end).toLowerCase();
+    const score = terms.filter(term => line.includes(term)).length;
+    if (score > (best?.score ?? 0)) best = { start, end, score };
+  }
+  if (!best || best.end <= head.text.length) return { text: head.text, content: head.text };
+
+  const dateStart = body.lastIndexOf('Date: ', best.start);
+  const dateHeader =
+    dateStart >= 0 && dateStart < best.start
+      ? body.slice(dateStart, starts.find(start => start > dateStart) ?? best.start).trim()
+      : '';
+  const prefix = `${dateHeader ? `${dateHeader} ` : ''}${EXCERPT_OMISSION_MARKER} `;
+  const window = chunkTextByTokens(body, maxTokens - estimateTokenCount(prefix), best.start);
+  if (!window.text) return { text: head.text, content: head.text };
+  return { text: prefix + window.text, content: window.text };
 }
 
 function lowDetailPartLimit(type: string): number {
@@ -1475,7 +1576,7 @@ export const recallTool = (
           minimum: 1,
           maximum: 20,
           description:
-            'Maximum number of items to return per page. Defaults to 20 for messages, 5 for mode="observations".',
+            'Maximum items per page: defaults to 20 for messages, 5 for observations. For search, target number of excerpts (default 10), plus compact references for evidence already in context; bounded backfill may return fewer excerpts.',
         },
         detail: {
           type: 'string',

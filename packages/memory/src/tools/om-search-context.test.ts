@@ -66,6 +66,154 @@ const hit = (groupId: string, text: string, range?: string): RecallSearchResult 
 const excerpts = (text: string) => [...text.matchAll(/```text\n([\s\S]*?)\n```/g)].map(match => match[1]!);
 
 describe('execution-time recall search context', () => {
+  it('backfills covered hits with the next ranked groups and keeps compact references', async () => {
+    const known = [hit('a', 'known A'), hit('b', 'known B')];
+    const previous = await setup(known).search();
+    const hits = [
+      ...known,
+      { ...hit('c', 'fresh C '.repeat(500)), observedAt: new Date('2024-02-02') },
+      { ...hit('d', 'fresh D '.repeat(500)), observedAt: new Date('2024-02-01') },
+      hit('e', 'lower ranked'),
+    ];
+    const { memory } = setup(hits);
+    memory.searchMessages = vi.fn(async ({ topK }) => ({ results: hits.slice(0, topK) }));
+    const result = await searchMessagesForResource({
+      memory,
+      resourceId,
+      query: 'topic',
+      topK: 2,
+      maxTokens: 100,
+      currentMessages: [resultMessage(previous)],
+    });
+    expect(vi.mocked(memory.searchMessages!).mock.calls.map(([args]) => args.topK)).toEqual([2, 10]);
+    expect(result.count).toBe(4);
+    expect(result.results.match(/Excerpt already in current context/g)).toHaveLength(2);
+    expect(excerpts(result.results)).toHaveLength(2);
+    expect(result.results).toContain('Showing 2 excerpts and 2 already-in-context references');
+    expect(result.results).not.toContain('lower ranked');
+    expect(result.results.indexOf('observation group: d')).toBeLessThan(result.results.indexOf('observation group: c'));
+    expect(excerpts(result.results).reduce((sum, text) => sum + estimateTokenCount(text), 0)).toBeLessThanOrEqual(100);
+  });
+
+  it('uses already-fetched candidates before another query and assigns spare tokens by relevance', async () => {
+    const known = hit('known', 'already visible');
+    const previous = await setup([known]).search();
+    const hits = [
+      hit('high', 'highest evidence '.repeat(500)),
+      hit('short', 'brief'),
+      known,
+      hit('lower', 'lower evidence '.repeat(500)),
+      hit('unused', 'not selected'),
+    ];
+    const { memory } = setup(hits);
+    const result = await searchMessagesForResource({
+      memory,
+      resourceId,
+      query: 'topic',
+      threadScope: threadId,
+      topK: 3,
+      maxTokens: 300,
+      currentMessages: [resultMessage(previous)],
+    });
+    expect(memory.searchMessages).toHaveBeenCalledTimes(1);
+    expect(result.count).toBe(4);
+    const text = excerpts(result.results);
+    expect(text).toHaveLength(3);
+    expect(estimateTokenCount(text[0]!)).toBeGreaterThan(100);
+    expect(text[1]).toBe('brief');
+    expect(estimateTokenCount(text[2]!)).toBeLessThanOrEqual(100);
+    expect(text.reduce((sum, value) => sum + estimateTokenCount(value), 0)).toBeLessThanOrEqual(300);
+    expect(result.results).not.toContain('not selected');
+  });
+
+  it('reserves useful excerpt space for backfill when a short initial pool already spent the allowance', async () => {
+    const known = hit('known', 'old');
+    const fresh = Array.from({ length: 10 }, (_, i) => hit(`fresh-${i}`, `evidence${i} `.repeat(5000)));
+    const previous = await setup([known]).search();
+    const { memory } = setup([]);
+    memory.searchMessages = vi.fn(async ({ topK }) => ({
+      results: topK === 10 ? [known, fresh[0]!] : [known, ...fresh],
+    }));
+    const result = await searchMessagesForResource({
+      memory,
+      resourceId,
+      query: 'topic',
+      currentMessages: [resultMessage(previous)],
+    });
+    const text = excerpts(result.results);
+    expect(result.count).toBe(11);
+    expect(text).toHaveLength(10);
+    expect(text.every(value => estimateTokenCount(value) >= 100)).toBe(true);
+    expect(text.reduce((sum, value) => sum + estimateTokenCount(value), 0)).toBeLessThanOrEqual(2000);
+  });
+
+  it.each([10, 20])('bounds backfill at five times limit=%s even when every candidate is covered', async topK => {
+    const hits = Array.from({ length: 120 }, (_, i) => hit(`known-${i}`, `known evidence ${i}`));
+    const current = await Promise.all(hits.map(async value => resultMessage(await setup([value]).search())));
+    const { memory } = setup(hits);
+    memory.searchMessages = vi.fn(async ({ topK }) => ({ results: hits.slice(0, topK) }));
+    const result = await searchMessagesForResource({
+      memory,
+      resourceId,
+      query: 'topic',
+      topK,
+      currentMessages: current,
+    });
+    expect(vi.mocked(memory.searchMessages!).mock.calls.map(([args]) => args.topK)).toEqual([topK, topK * 5]);
+    expect(result.count).toBe(topK * 5);
+    expect(excerpts(result.results)).toEqual([]);
+    expect(result.results).toContain('Backfill is bounded; fewer excerpts do not mean history is exhausted.');
+  });
+
+  it.each(['start', 'end'])(
+    'backfills an overlapping %s endpoint while preserving thread and date filters',
+    async endpoint => {
+      const source = [message('start'), message('end', 1)];
+      const date = new Date('2024-01-02');
+      const known = { ...hit('known', 'summary', 'start:end'), observedAt: date };
+      const fresh = { ...hit('fresh', 'new evidence'), observedAt: date };
+      const { memory } = setup([known], source);
+      memory.searchMessages = vi.fn(async ({ topK }) => ({
+        results:
+          topK === 20
+            ? [known]
+            : [
+                known,
+                { ...fresh, groupId: 'wrong-thread', threadId: 'other' },
+                { ...fresh, groupId: 'wrong-date', observedAt: new Date('2025-01-01') },
+                fresh,
+              ],
+      }));
+      const result = await searchMessagesForResource({
+        memory,
+        resourceId,
+        query: 'topic',
+        threadScope: threadId,
+        after: '2024-01-01',
+        before: '2024-02-01',
+        currentMessages: [message(endpoint)],
+      });
+      expect(memory.recall).not.toHaveBeenCalled();
+      expect(result.count).toBe(2);
+      expect(result.results).toContain('Source range overlaps current context');
+      expect(excerpts(result.results)).toEqual(['new evidence']);
+      expect(result.results).not.toContain('wrong-thread');
+      expect(result.results).not.toContain('wrong-date');
+      expect(memory.searchMessages).toHaveBeenLastCalledWith({
+        query: 'topic',
+        resourceId,
+        topK: 50,
+        filter: { threadId, observedAfter: new Date('2024-01-01'), observedBefore: new Date('2024-02-01') },
+      });
+    },
+  );
+
+  it('does not fetch deeper candidates when no evidence is already covered', async () => {
+    const { search, memory } = setup([hit('a', 'fresh evidence')]);
+    await search([message('unrelated')]);
+    expect(memory.searchMessages).toHaveBeenCalledTimes(1);
+  });
+
   it('compacts identical excerpts and spends the reclaimed allowance on fresh hits', async () => {
     const a = hit('a', 'previous evidence '.repeat(500));
     const b = hit('b', 'new evidence '.repeat(500));
@@ -132,54 +280,48 @@ describe('execution-time recall search context', () => {
     expect((await search([current])).results).toContain('Excerpt already in current context');
   });
 
-  it('suppresses a fully visible source range using a bounded read without modifying the messages', async () => {
-    const source = [message('start'), message('middle', 1), message('end', 2)];
-    const { search, memory } = setup([hit('a', 'summary', 'start:end')], source);
-    const original = structuredClone(source);
-    const result = await search(source);
-    expect(result.results).toContain('Source messages already in current context.');
-    expect(excerpts(result.results)).toEqual([]);
-    expect(memory.recall).toHaveBeenCalledExactlyOnceWith({
-      threadId,
-      resourceId,
-      page: 0,
-      perPage: 4,
-      orderBy: { field: 'createdAt', direction: 'ASC' },
-      filter: { dateRange: { start: source[0]!.createdAt, end: source[2]!.createdAt } },
-    });
-    expect(source).toEqual(original);
-    expect((await search()).results).toContain('summary');
-  });
+  it.each(['start', 'end'])(
+    'compacts a source range when only its %s endpoint is visible, without storage reads',
+    async endpoint => {
+      const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
+      const current = [message(endpoint)];
+      const original = structuredClone(current);
+      const result = await search(current);
+      expect(excerpts(result.results)).toEqual([]);
+      expect(result.results).toContain('Source range overlaps current context.');
+      expect(memory.recall).not.toHaveBeenCalled();
+      expect(current).toEqual(original);
+      expect(excerpts((await search()).results)).toEqual(['summary']);
+    },
+  );
 
-  it.each([
-    'missing-middle',
-    'trimmed-parts',
-    'wrong-thread',
-    'missing-end',
-    'unpersisted',
-    'incomplete-window',
-    'bad-range',
-  ] as const)('keeps an excerpt when source coverage is uncertain: %s', async kind => {
-    const source = [message('start'), message('middle', 1), message('end', 2)];
-    const current = structuredClone(source);
-    if (kind === 'missing-middle') current.splice(1, 1);
-    if (kind === 'trimmed-parts') current[1]!.content.parts = [{ type: 'text', text: 'trimmed' }];
-    if (kind === 'wrong-thread')
-      current.forEach(message => {
-        message.threadId = 'other';
-      });
-    if (kind === 'missing-end') current.pop();
-    const { search, memory } = setup(
-      [hit('a', 'summary', kind === 'bad-range' ? 'start:end:extra' : 'start:end')],
-      kind === 'unpersisted' ? [] : source,
-    );
-    if (kind === 'incomplete-window')
-      memory.recall = vi.fn(async () => ({ messages: source, total: 100, page: 0, perPage: 4, hasMore: true }));
-    expect((await search(current)).results).toContain('```text\nsummary\n```');
-    if (['wrong-thread', 'missing-end', 'bad-range'].includes(kind)) expect(memory.recall).not.toHaveBeenCalled();
-  });
+  it.each(['complete', 'missing-middle', 'trimmed-parts'] as const)(
+    'uses endpoint identity rather than stored content: %s',
+    async kind => {
+      const current = [message('start'), message('middle', 1), message('end', 2)];
+      if (kind === 'missing-middle') current.splice(1, 1);
+      if (kind === 'trimmed-parts') current[0]!.content.parts = [{ type: 'text', text: 'changed' }];
+      const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
+      expect(excerpts((await search(current)).results)).toEqual([]);
+      expect(memory.recall).not.toHaveBeenCalled();
+    },
+  );
 
-  it('verifies source coverage through real memory storage, including a missing middle message', async () => {
+  it.each(['wrong-thread', 'middle-only', 'empty', 'bad-range', 'missing-range', 'missing-group'] as const)(
+    'keeps the excerpt without a matching endpoint: %s',
+    async kind => {
+      const current = kind === 'empty' ? [] : [message(kind === 'middle-only' ? 'middle' : 'start')];
+      if (kind === 'wrong-thread') current[0]!.threadId = 'other';
+      const match = hit('a', 'summary', kind === 'bad-range' ? 'start:end:extra' : 'start:end');
+      if (kind === 'missing-range') delete match.range;
+      if (kind === 'missing-group') delete match.groupId;
+      const { search, memory } = setup([match]);
+      expect(excerpts((await search(current)).results)).toEqual(['summary']);
+      expect(memory.recall).not.toHaveBeenCalled();
+    },
+  );
+
+  it('suppresses stored source groups by endpoints without reading message history', async () => {
     const memory = new Memory({ storage: new InMemoryStore() });
     const source = [message('start'), message('middle', 1), message('end', 2)];
     await memory.saveThread({
@@ -193,15 +335,17 @@ describe('execution-time recall search context', () => {
     });
     await memory.saveMessages({ messages: source });
     vi.spyOn(memory, 'searchMessages').mockResolvedValue({ results: [hit('a', 'summary', 'start:end')] });
+    const recall = vi.spyOn(memory, 'recall');
     const complete = await searchMessagesForResource({ memory, resourceId, query: 'topic', currentMessages: source });
-    expect(complete.results).toContain('Source messages already in current context');
+    expect(complete.results).toContain('Source range overlaps current context');
     const partial = await searchMessagesForResource({
       memory,
       resourceId,
       query: 'topic',
       currentMessages: [source[0]!, source[2]!],
     });
-    expect(partial.results).toContain('```text\nsummary\n```');
+    expect(partial.results).toContain('Source range overlaps current context');
+    expect(recall).not.toHaveBeenCalled();
   });
 
   it('handles a single-message range with later appended parts and non-visible OM markers', async () => {
@@ -210,7 +354,7 @@ describe('execution-time recall search context', () => {
     current[0]!.content.parts.push({ type: 'text', text: 'More recent content' });
     source[0]!.content.parts.push({ type: 'data-om-observation', data: { observed: true } });
     const { search } = setup([hit('a', 'summary', 'one:one')], source);
-    expect((await search(current)).results).toContain('Source messages already in current context');
+    expect((await search(current)).results).toContain('Source range overlaps current context');
   });
 
   it('routes the live getter through recall.execute without using the input-only messages field', async () => {
@@ -238,5 +382,52 @@ describe('execution-time recall search context', () => {
     getMessages.mockReturnValue([]);
     const next = await tool.execute?.({ mode: 'search', query: 'topic' }, context);
     expect(next).toEqual(expect.objectContaining({ results: expect.stringContaining('```text\nevidence\n```') }));
+  });
+});
+
+describe('query-relevant search excerpts', () => {
+  const filler = Array.from(
+    { length: 12 },
+    (_, i) => `* 🟡 (15:${String(10 + i).padStart(2, '0')}) User asked about memory spikes and gc tuning step ${i}.`,
+  ).join(' ');
+  const group = hit(
+    'g',
+    `Date: Jan 22, 2025 * 🟡 (09:00) Earlier day note. Date: Jan 23, 2025 ${filler} ` +
+      `* 🔴 (16:09) User debugging 'state overload' warning while scaling to 45 agents concurrently. ` +
+      `* 🟡 (16:20) User asked about log rotation.`,
+  );
+  const searchFor = (query: string, currentMessages: MastraDBMessage[] = [], maxTokens = 60) => {
+    const { memory } = setup([group]);
+    return searchMessagesForResource({ memory, resourceId, query, currentMessages, maxTokens });
+  };
+
+  it('starts a truncated excerpt at the line that matches the query, keeping its date', async () => {
+    const result = await searchFor("'state overload' warning agents");
+    const [excerpt] = excerpts(result.results);
+    expect(excerpt).toMatch(
+      /^Date: Jan 23, 2025 \[earlier lines omitted\] \* 🔴 \(16:09\) User debugging 'state overload'/,
+    );
+    expect(excerpt).toContain('45 agents');
+    expect(estimateTokenCount(excerpt!)).toBeLessThanOrEqual(60);
+    expect(result.results).toContain('[Excerpt truncated]');
+  });
+
+  it('keeps the head of the text when no line matches the query', async () => {
+    const [excerpt] = excerpts((await searchFor('unrelated topic')).results);
+    expect(excerpt).toMatch(/^Date: Jan 22, 2025 \* 🟡 \(09:00\) Earlier day note\./);
+  });
+
+  it('shows the unseen matching line even when the head of the group is already in context', async () => {
+    const head = await searchFor('unrelated topic');
+    const result = await searchFor('state overload', [resultMessage(head)]);
+    expect(result.results).not.toContain('already in current context');
+    expect(excerpts(result.results)[0]).toContain("'state overload' warning");
+  });
+
+  it('compacts a matching excerpt when the whole group was already shown', async () => {
+    const full = await searchFor('unrelated topic', [], 2000);
+    expect(excerpts(full.results)[0]).toBe(group.text);
+    const result = await searchFor('state overload', [resultMessage(full)]);
+    expect(result.results).toContain('Excerpt already in current context');
   });
 });

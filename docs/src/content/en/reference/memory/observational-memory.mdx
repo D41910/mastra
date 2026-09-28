@@ -1230,9 +1230,11 @@ Use `direction: "before"` to page backward. Omit `direction` to read the full an
 
 Each page identifies its thread and anchor, includes raw message ranges, and provides continuation calls or explicit start/end markers. These boundaries apply to retained original observation groups, not raw message availability. Reflections are excluded. Paging reads earlier generations when needed to recover original groups and deduplicates groups carried across generations.
 
-Search selects hits by similarity, then displays them by observation date. It divides a 2,000-token observation-text allowance across the selected hits and gives unused space to higher-ranked hits first. Every selected hit remains visible, with shortened excerpts marked individually. Headers, dates, IDs, gap markers, and paging guidance sit outside that allowance, so the full response can exceed 2,000 tokens. Use observation paging to expand a shortened excerpt rather than repeating the search.
+Search selects hits by similarity, then displays them by observation date. It divides a 2,000-token observation-text allowance across the selected hits and gives unused space to higher-ranked hits first. Every selected hit remains visible, with shortened excerpts marked individually. When a hit's text doesn't fit its share, the excerpt starts at the observation line that matches the most query terms, keeping that line's date and marking earlier lines as omitted. Without a matching line, it starts at the beginning. Headers, dates, IDs, gap markers, and paging guidance sit outside that allowance, so the full response can exceed 2,000 tokens. Use observation paging to expand a shortened excerpt rather than repeating the search.
 
-In supported agent loops, search checks the current message list when the tool executes. Hits become compact group and thread references when the same excerpt is already present in a previous recall search result, or when all retained source messages in the group's range remain present with their content intact. Longer or different excerpts remain available. The freed text allowance goes to other hits. Missing messages or trimmed parts prevent source-range suppression.
+In supported agent loops, search checks the current message list when the tool executes. Hits become compact group and thread references when the text an excerpt would show is already present in a previous recall search result, or when either endpoint of the group's source-message range is present in the same thread. The endpoint check uses message IDs without reading stored history or comparing message content. These hits are labeled `Source range overlaps current context.` This is an overlap check, not a guarantee that every source message is visible. Longer or different excerpts remain available unless their source range overlaps. Use observation paging to read a compacted group in full.
+
+Search keeps the compact references and checks lower-ranked candidates for additional excerpts. In search mode, `limit` targets the number of excerpts, not counting compact references. Backfill uses candidates already fetched before making at most one deeper query, capped at 100 vector matches per query. Vector chunks can collapse into fewer observation groups, so this doesn't guarantee `limit` excerpts. A shorter result doesn't establish that history is exhausted. The 2,000-token text allowance is shared across excerpts, with unused space assigned by relevance. `count` includes both excerpts and compact references and can exceed `limit`.
 
 These checks don't use a persistent seen-results cache. If earlier results or source messages leave the message list, a later search can show the excerpt again. Without access to the current message list, search returns normal excerpts. Request-stage transforms that only change the provider prompt aren't reflected in this check. Observation paging always returns the requested groups without this suppression.
 
@@ -1310,7 +1312,8 @@ Existing retained records with observation-group tags work without re-indexing. 
     type: 'number',
     isOptional: true,
     defaultValue: '20',
-    description: 'Maximum number of items to return per page, up to 20. Observations mode defaults to 5 groups.',
+    description:
+      'Page size, from 1 to 20. Defaults to 20 for messages and 5 groups for observations. Search defaults to 10 excerpts, plus compact references for evidence already in context. Bounded backfill can return fewer excerpts.',
   },
   {
     name: 'detail',
@@ -1481,12 +1484,13 @@ Existing retained records with observation-group tags work without re-indexing. 
     name: 'results',
     type: 'string',
     description:
-      'Formatted search results grouped by thread. Each result shows the thread title, thread ID, relevance score, message preview, and a cursor ID for browsing into that thread.',
+      'Search hits displayed by observation date, with excerpts or compact references for evidence already in context. Full entries include thread details, a relevance score, an observation group ID, and source message ranges.',
   },
   {
     name: 'count',
     type: 'number',
-    description: 'Number of matching messages found.',
+    description:
+      'Number of displayed observation groups, including compact references. Can exceed limit when search fills covered hits with additional excerpts.',
   },
 ]}
 />
