@@ -165,48 +165,45 @@ describe('execution-time recall search context', () => {
     expect(result.results).toContain('Backfill is bounded; fewer excerpts do not mean history is exhausted.');
   });
 
-  it.each(['start', 'end'])(
-    'backfills an overlapping %s endpoint while preserving thread and date filters',
-    async endpoint => {
-      const source = [message('start'), message('end', 1)];
-      const date = new Date('2024-01-02');
-      const known = { ...hit('known', 'summary', 'start:end'), observedAt: date };
-      const fresh = { ...hit('fresh', 'new evidence'), observedAt: date };
-      const { memory } = setup([known], source);
-      memory.searchMessages = vi.fn(async ({ topK }) => ({
-        results:
-          topK === 20
-            ? [known]
-            : [
-                known,
-                { ...fresh, groupId: 'wrong-thread', threadId: 'other' },
-                { ...fresh, groupId: 'wrong-date', observedAt: new Date('2025-01-01') },
-                fresh,
-              ],
-      }));
-      const result = await searchMessagesForResource({
-        memory,
-        resourceId,
-        query: 'topic',
-        threadScope: threadId,
-        after: '2024-01-01',
-        before: '2024-02-01',
-        currentMessages: [message(endpoint)],
-      });
-      expect(memory.recall).not.toHaveBeenCalled();
-      expect(result.count).toBe(2);
-      expect(result.results).toContain('Source range overlaps current context');
-      expect(excerpts(result.results)).toEqual(['new evidence']);
-      expect(result.results).not.toContain('wrong-thread');
-      expect(result.results).not.toContain('wrong-date');
-      expect(memory.searchMessages).toHaveBeenLastCalledWith({
-        query: 'topic',
-        resourceId,
-        topK: 50,
-        filter: { threadId, observedAfter: new Date('2024-01-01'), observedBefore: new Date('2024-02-01') },
-      });
-    },
-  );
+  it('backfills a range still in context while preserving thread and date filters', async () => {
+    const source = [message('start'), message('end', 1)];
+    const date = new Date('2024-01-02');
+    const known = { ...hit('known', 'summary', 'start:end'), observedAt: date };
+    const fresh = { ...hit('fresh', 'new evidence'), observedAt: date };
+    const { memory } = setup([known], source);
+    memory.searchMessages = vi.fn(async ({ topK }) => ({
+      results:
+        topK === 20
+          ? [known]
+          : [
+              known,
+              { ...fresh, groupId: 'wrong-thread', threadId: 'other' },
+              { ...fresh, groupId: 'wrong-date', observedAt: new Date('2025-01-01') },
+              fresh,
+            ],
+    }));
+    const result = await searchMessagesForResource({
+      memory,
+      resourceId,
+      query: 'topic',
+      threadScope: threadId,
+      after: '2024-01-01',
+      before: '2024-02-01',
+      currentMessages: source,
+    });
+    expect(memory.recall).not.toHaveBeenCalled();
+    expect(result.count).toBe(2);
+    expect(result.results).toContain('Source range overlaps current context');
+    expect(excerpts(result.results)).toEqual(['new evidence']);
+    expect(result.results).not.toContain('wrong-thread');
+    expect(result.results).not.toContain('wrong-date');
+    expect(memory.searchMessages).toHaveBeenLastCalledWith({
+      query: 'topic',
+      resourceId,
+      topK: 50,
+      filter: { threadId, observedAfter: new Date('2024-01-01'), observedBefore: new Date('2024-02-01') },
+    });
+  });
 
   it('does not fetch deeper candidates when no evidence is already covered', async () => {
     const { search, memory } = setup([hit('a', 'fresh evidence')]);
@@ -280,20 +277,27 @@ describe('execution-time recall search context', () => {
     expect((await search([current])).results).toContain('Excerpt already in current context');
   });
 
-  it.each(['start', 'end'])(
-    'compacts a source range when only its %s endpoint is visible, without storage reads',
-    async endpoint => {
-      const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
-      const current = [message(endpoint)];
-      const original = structuredClone(current);
-      const result = await search(current);
-      expect(excerpts(result.results)).toEqual([]);
-      expect(result.results).toContain('Source range overlaps current context.');
-      expect(memory.recall).not.toHaveBeenCalled();
-      expect(current).toEqual(original);
-      expect(excerpts((await search()).results)).toEqual(['summary']);
-    },
-  );
+  it('compacts a source range when both endpoints are visible, without storage reads', async () => {
+    const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
+    const current = [message('start'), message('end', 1)];
+    const original = structuredClone(current);
+    const result = await search(current);
+    expect(excerpts(result.results)).toEqual([]);
+    expect(result.results).toContain('Source range overlaps current context.');
+    expect(memory.recall).not.toHaveBeenCalled();
+    expect(current).toEqual(original);
+    expect(excerpts((await search()).results)).toEqual(['summary']);
+  });
+
+  // After a group is observed, pruning removes everything before its last message and trims that
+  // message to parts added after the observation marker, so a lone endpoint no longer holds the group's content.
+  it.each(['start', 'end'])('keeps the excerpt when only its %s endpoint is visible', async endpoint => {
+    const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
+    const result = await search([message(endpoint)]);
+    expect(excerpts(result.results)).toEqual(['summary']);
+    expect(result.results).not.toContain('Source range overlaps current context');
+    expect(memory.recall).not.toHaveBeenCalled();
+  });
 
   it.each(['complete', 'missing-middle', 'trimmed-parts'] as const)(
     'uses endpoint identity rather than stored content: %s',

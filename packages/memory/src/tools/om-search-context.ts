@@ -50,7 +50,8 @@ export function sourceRangeOverlapsContext({
   if (!match.groupId || !match.range) return false;
   const endpoints = /^([^:,]+):([^:,]+)$/.exec(match.range);
   if (!endpoints) return false;
-  return messages.some(
-    message => message.threadId === match.threadId && (message.id === endpoints[1] || message.id === endpoints[2]),
-  );
+  // A group spans one observed batch. Once observed, everything before its last message is pruned and
+  // that message is trimmed to later parts, so a lone endpoint does not mean the group's content is visible.
+  const visible = new Set(messages.filter(message => message.threadId === match.threadId).map(message => message.id));
+  return visible.has(endpoints[1]!) && visible.has(endpoints[2]!);
 }

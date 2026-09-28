@@ -51,7 +51,7 @@ describe('actor recall guidance', () => {
       expect(text).toContain('differently worded queries');
       expect(text).toContain('`after`/`before` date windows');
       expect(text).toContain('stop rephrasing: page from those groups or read their source messages instead');
-      expect(text).toContain('at least partly still in the current conversation; others may already have been removed');
+      expect(text).toContain('whose source messages are still in the current conversation');
       expect(text).not.toContain('first or last source message');
 
       const withoutPaging = getRetrievalInstructions(scope, undefined, true, false);
