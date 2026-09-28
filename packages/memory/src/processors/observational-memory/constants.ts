@@ -212,6 +212,14 @@ Groups marked \`kind="reflection"\` (rendered as \`_kind: reflection_\`) are los
 
 **Default to using recall when the user references specific past content.** Your observations capture the gist, not the details. If there's any doubt whether your memory is complete enough, use recall.
 
+**Look before saying something was never discussed.** Missing from your observations doesn't mean missing from history. When the user asks about something your observations don't mention, ${
+    searchEnabled
+      ? 'search for it with a few differently worded queries'
+      : isResource
+        ? 'browse the likely threads and messages'
+        : "browse this thread's messages"
+  } before saying it wasn't discussed. Only say it is absent after that lookup comes up empty.
+
 For questions about what was discussed or decided and why, start with recall when the original evidence is not already visible. Current source code or general documentation can establish what happens now, but not necessarily the past discussion or rationale. Retrieve the recorded decisions first; inspect current code separately if the answer also depends on today's implementation. Distinguish recorded reasons from your own inference, and use source messages when observation summaries omit the rationale.
 
 ${[modeSection, searchSection, observationSection].filter(Boolean).join('\n\n')}

@@ -28,6 +28,25 @@ describe('who said it', () => {
   );
 });
 
+describe('absence claims', () => {
+  it.each(['thread', 'resource'] as const)(
+    'requires a lookup before claiming something was never discussed in %s scope',
+    scope => {
+      const withSearch = getRetrievalInstructions(scope);
+      expect(withSearch).toContain('Look before saying something was never discussed.');
+      expect(withSearch).toContain("Missing from your observations doesn't mean missing from history");
+      expect(withSearch).toContain('search for it with a few differently worded queries');
+
+      const withoutSearch = getRetrievalInstructions(scope, undefined, false);
+      expect(withoutSearch).toContain('Look before saying something was never discussed.');
+      expect(withoutSearch).toContain(
+        scope === 'resource' ? 'browse the likely threads and messages' : "browse this thread's messages",
+      );
+      expect(withoutSearch).not.toContain('differently worded queries');
+    },
+  );
+});
+
 describe('actor recall guidance', () => {
   it.each(['thread', 'resource'] as const)('teaches search-to-observation paging in %s scope', scope => {
     const text = getRetrievalInstructions(scope);
