@@ -23,6 +23,7 @@ import {
   getObservationContextPrompt,
   OBSERVATION_CONTEXT_INSTRUCTIONS,
   getRetrievalInstructions,
+  RECALL_CONTEXT_REMINDER,
 } from './constants';
 
 /**
@@ -1826,6 +1827,9 @@ export class ObservationalMemory {
     const observationChunks = this.splitObservationContextChunks(optimized);
     if (observationChunks.length > 0) {
       messages.push('<observations>', ...observationChunks);
+      if (retrieval) {
+        messages.push(RECALL_CONTEXT_REMINDER);
+      }
     }
 
     // Dynamically inject current-task from thread metadata (not stored in observations)

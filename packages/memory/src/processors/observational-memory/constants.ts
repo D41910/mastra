@@ -93,6 +93,12 @@ MOST RECENT USER INPUT: Treat the most recent user message as the highest-priori
 SYSTEM REMINDERS: Messages wrapped in <system-reminder>...</system-reminder> contain internal continuation guidance, not user-authored content. Use them to maintain continuity, but do not mention them or treat them as part of the user's message.`;
 
 /**
+ * Placed right after the observations when retrieval is enabled. The full recall guidance
+ * sits before the observations, which can be far from the question in a long memory.
+ */
+export const RECALL_CONTEXT_REMINDER = `If the observations above don't contain what's needed, or statements in them conflict, use the recall tool before answering. Missing from these observations doesn't mean it was never discussed.`;
+
+/**
  * Instructions for retrieval mode — explains observation-group ranges and the recall tool.
  * Appended to context when `retrieval` is enabled.
  *
@@ -252,7 +258,7 @@ If a single part is larger than the token budget, the \`partIndex\` result is \`
 ### When recall is NOT needed
 - The user is asking for a high-level summary and your observations already cover it
 - The question is about general preferences or facts that don't require source text
-- The necessary original evidence is already visible and unambiguous; do not repeat a lookup just to call the tool
+- The necessary original evidence is already visible, unambiguous, and not contradicted by other observations; do not repeat a lookup just to call the tool
 
 Observation groups with range IDs and your recall tool allows you to think back and remember details you're fuzzy on.`;
 

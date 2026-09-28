@@ -5111,6 +5111,36 @@ describe('ObservationalMemory Integration', () => {
       expect(threadText).toContain('limited to the current conversation thread');
     });
 
+    it('reminds the agent to use recall right after the observations', () => {
+      const observations = '<observation-group id="group-1" range="msg-1:msg-2">\n- 🔴 Fact\n</observation-group>';
+      const formatted: string[] = (
+        makeRetrievalOm({ vector: true, scope: 'thread' }) as any
+      ).formatObservationsForContext(
+        observations,
+        'the current task',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      const factIndex = formatted.findIndex(message => message.includes('- 🔴 Fact'));
+      const reminderIndex = formatted.findIndex(message => message.includes('use the recall tool before answering'));
+      expect(reminderIndex).toBe(factIndex + 1);
+      expect(formatted[reminderIndex]).toContain("Missing from these observations doesn't mean it was never discussed");
+      expect(formatted.findIndex(message => message.includes('the current task'))).toBeGreaterThan(reminderIndex);
+
+      const withoutRetrieval: string[] = (
+        makeRetrievalOm({ vector: true, scope: 'thread' }) as any
+      ).formatObservationsForContext(observations);
+      expect(withoutRetrieval.join('\n\n')).not.toContain('use the recall tool before answering');
+    });
+
+    it('only skips recall when visible evidence is not contradicted', () => {
+      const text = getRetrievalInstructions('thread');
+      expect(text).toContain('already visible, unambiguous, and not contradicted by other observations');
+    });
+
     it('injects appended custom instructions into actor context', () => {
       const custom = 'Use a small limit with detail="low" for an initial scan.';
       const text = (makeRetrievalOm({ scope: 'resource', instructions: custom }) as any)
