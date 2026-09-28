@@ -38,6 +38,31 @@ describe('actor recall guidance', () => {
     expect(text).not.toContain('go straight to `mode: "messages"`');
   });
 
+  it.each(['thread', 'resource'] as const)(
+    'lays out search, paging, and source reads as one lookup in %s scope',
+    scope => {
+      const text = getRetrievalInstructions(scope);
+      const search = text.indexOf('1. **Search to locate.**');
+      const paging = text.indexOf('2. **Page observations for context.**');
+      const messages = text.indexOf('3. **Read source messages to confirm.**');
+      expect(search).toBeGreaterThan(-1);
+      expect(paging).toBeGreaterThan(search);
+      expect(messages).toBeGreaterThan(paging);
+      expect(text).toContain('differently worded queries');
+      expect(text).toContain('`after`/`before` date windows');
+      expect(text).toContain('stop rephrasing: page from those groups or read their source messages instead');
+      expect(text).toContain('at least partly still in the current conversation; others may already have been removed');
+      expect(text).not.toContain('first or last source message');
+
+      const withoutPaging = getRetrievalInstructions(scope, undefined, true, false);
+      expect(withoutPaging).toContain('1. **Search to locate.**');
+      expect(withoutPaging).toContain('2. **Read source messages to confirm.**');
+      expect(withoutPaging).toContain('stop rephrasing: read their source messages instead');
+      expect(withoutPaging).not.toContain('mode: "observations"');
+      expect(withoutPaging).not.toContain('page a referenced group');
+    },
+  );
+
   it.each(['thread', 'resource'] as const)('does not advertise unavailable paging in %s scope', async scope => {
     const browsing = getRetrievalInstructions(scope, undefined, false);
     expect(browsing).not.toContain('mode: "observations"');

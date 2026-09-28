@@ -146,23 +146,33 @@ The recall tool is limited to the current conversation thread.
 
   const modeSection = isResource ? resourceModeSection : threadModeSection;
 
+  const pagingEnabled = searchEnabled && observationPagingEnabled;
+  const lookupSteps = [
+    `**Search to locate.** Run a few differently worded queries rather than relying on one. When you roughly know when something happened, or need events from different periods, repeat the search with \`after\`/\`before\` date windows. Date filters apply to when an observation was recorded, not necessarily to dates mentioned inside it, so widen or remove them when nothing fits. If nothing useful comes up, try the user's message verbatim as the search query.`,
+    ...(pagingEnabled
+      ? [
+          `**Page observations for context.** Open a relevant hit with \`mode: "observations"\` and its \`groupId\` to read the full group and the dated conclusions and decisions around it, without loading every tool call or diff. Do this for truncated excerpts, for dates you need to pin down, and for events that unfolded over several turns. To understand what led to an event and what followed, page both before and after the anchor.`,
+        ]
+      : []),
+    `**Read source messages to confirm.** When exact wording, numbers, code, who said what, or conflicting accounts matter, read the raw messages from the hit's source range. The range connects the summary view to the raw-message view.`,
+  ];
+
   const searchSection = searchEnabled
-    ? `### Searching for evidence
+    ? `### Finding evidence
 Search matches are entry points, not a complete timeline. Similarity selects the matches; they are displayed by observation date. A missing search hit is not evidence that an event did not happen.
 
-A compact group reference marked "Excerpt already in current context" omits an excerpt present in an earlier search result. "Source range overlaps current context" means the group's first or last source message is still present in the same thread when the tool runs; it does not guarantee that every source message is visible. Search keeps these references and tries lower-ranked matches to fill the requested number of excerpts. This backfill is bounded: fewer excerpts do not mean history is exhausted. Use the evidence already present rather than repeating the same lookup. You can still expand the group when you need its full contents or search again if that context is no longer available.
+${pagingEnabled ? 'Observations and messages are two views of the same conversation history, not separate archives. Use search to find an entry point, observations for breadth, and messages for depth:' : 'Use search to find an entry point and messages for depth:'}
+${lookupSteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
 
-Try your own focused search query first. If nothing useful comes up, try the user's message verbatim as the search query. Broaden or remove date filters if needed: they filter indexed observation dates, not necessarily the dates of events mentioned inside them. If search still finds nothing useful, browse raw messages${isResource ? ' or discover other threads' : ' in this thread'} before concluding the information is unavailable. Raw history may exist for threads that have no observations yet.`
+When searches keep returning the same groups, often as already-in-context references, stop rephrasing: ${pagingEnabled ? 'page from those groups or read their source messages' : 'read their source messages'} instead.
+
+"Excerpt already in current context" marks a hit whose text an earlier search result already shows. "Source range overlaps current context" marks a group whose source messages are at least partly still in the current conversation; others may already have been removed. Search keeps these references and tries lower-ranked matches to fill the requested number of excerpts. This backfill is bounded: fewer excerpts do not mean history is exhausted. Use the evidence already present rather than repeating the same lookup. You can still ${pagingEnabled ? 'page a referenced group' : "read a referenced group's source messages"} when you need all of it, or search again if that context is no longer available.
+
+If search still finds nothing useful, browse raw messages${isResource ? ' or discover other threads' : ' in this thread'} before concluding the information is unavailable. Raw history may exist for threads that have no observations yet.`
     : '';
 
-  const observationSection =
-    searchEnabled && observationPagingEnabled
-      ? `### Two views of the same history
-\`mode: "observations"\` and \`mode: "messages"\` are two views of the same conversation history, not separate archives. Use search to find an entry point, observations for breadth, and messages for depth:
-- **Broaden with observations:** read the surrounding dated conclusions and decisions without loading every tool call or diff. To understand what led to an event and what followed, page both before and after the anchor.
-- **Drill into messages:** use a message ID from a group's \`_range\` to inspect the underlying source wording, code, or tool output. The range connects the summary view to the raw-message view.
-
-### Paging original observations
+  const observationSection = pagingEnabled
+    ? `### Paging original observations
 Use \`mode: "observations"\` around a relevant search hit to fill in missing details, check earlier or later events, and recover context omitted from a reflection or search result.
 
 - Copy the hit's \`groupId\`${isResource ? ' and \`threadId\`' : ''}. Omit \`direction\` to read the full anchor group and following groups, including text truncated in search.
@@ -173,7 +183,7 @@ Use \`mode: "observations"\` around a relevant search hit to fill in missing det
 - These pages contain original observations, not reflections. For exact wording or details absent from the observations, use \`mode: "messages"\` with a message ID from the group's \`_range\`.
 
 Stop once the relevant evidence is sufficient. If retained history is incomplete, say what is unknown rather than guessing.`
-      : '';
+    : '';
 
   const base = `## Recall — looking up source messages
 
