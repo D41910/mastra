@@ -1,6 +1,7 @@
 import type { ObservationalMemoryHistoryOptions, ObservationalMemoryRecord } from '@mastra/core/storage';
 import xxhash from 'xxhash-wasm';
 import { addRelativeTimeToObservations } from '../processors/observational-memory/date-utils';
+import { getBufferedChunks } from '../processors/observational-memory/message-utils';
 import { parseObservationGroups } from '../processors/observational-memory/observation-groups';
 import type { ObservationGroup } from '../processors/observational-memory/observation-groups';
 
@@ -25,10 +26,7 @@ const hasher = xxhash();
 
 async function buildTimeline(record: OMGenerationRecord, threadId: string): Promise<GroupTimeline> {
   // Buffering indexes originals before activation. Preserve the same append order as activation.
-  let text = [
-    record.activeObservations,
-    ...(record.bufferedObservationChunks ?? []).map(chunk => chunk.observations),
-  ].join('\n');
+  let text = [record.activeObservations, ...getBufferedChunks(record).map(chunk => chunk.observations)].join('\n');
   if (record.threadId === null) {
     // Resource-scoped records mix threads; attribution can use raw or obscured thread IDs.
     const obscuredId = (await hasher).h32ToString(threadId);

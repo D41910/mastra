@@ -9,6 +9,7 @@ import {
   formatRelativeTime,
   resolveTimeZone,
 } from '../processors/observational-memory/date-utils';
+import { getBufferedChunks } from '../processors/observational-memory/message-utils';
 import { parseObservationGroups } from '../processors/observational-memory/observation-groups';
 import { safeSlice } from '../processors/observational-memory/string-utils';
 import {
@@ -435,7 +436,7 @@ export async function searchMessagesForResource({
     const [current] = await om.getHistory(currentThreadId, resourceId, 1);
     for (const observations of [
       current?.activeObservations ?? '',
-      ...(current?.bufferedObservationChunks ?? []).map(chunk => chunk.observations),
+      ...getBufferedChunks(current).map(chunk => chunk.observations),
     ]) {
       for (const group of parseObservationGroups(observations)) contextGroupIds.add(group.id);
     }

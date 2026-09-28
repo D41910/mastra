@@ -105,6 +105,24 @@ describe('execution-time recall search context', () => {
       expect(getHistory.mock.calls.filter(call => call.length === 3 || !call[3])).toHaveLength(1);
     });
 
+    it.each([
+      ['an empty object', {}],
+      [
+        'a JSON string',
+        JSON.stringify([
+          { observations: '<observation-group id="buffered" range="a:b">\nbuffered text\n</observation-group>' },
+        ]),
+      ],
+    ])('reads buffered chunks stored as %s', async (_label, stored) => {
+      const { result } = await searchWithRecord({
+        activeObservations: group('active', 'active text'),
+        bufferedObservationChunks: stored as never,
+      });
+      expect(excerpts(result.results)).toEqual(
+        typeof stored === 'string' ? ['old text'] : ['buffered text', 'old text'],
+      );
+    });
+
     it('keeps excerpts when the current record holds none of the hits', async () => {
       const { result } = await searchWithRecord({ activeObservations: group('other', 'other text') });
       expect(excerpts(result.results)).toEqual(['active text', 'buffered text', 'old text']);

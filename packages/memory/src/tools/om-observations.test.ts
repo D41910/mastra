@@ -77,6 +77,10 @@ describe('observation group history', () => {
       expect(om.getHistory.mock.calls.every(call => call[2] === 1)).toBe(true);
     },
   );
+  it('pages records whose stored buffered chunks are not an array', async () => {
+    const om = history([{ ...record(0, ['a', 'b']), bufferedObservationChunks: {} as never }]);
+    expect(ids((await pageObservationGroups({ om, ...args, groupId: 'a' })).results)).toEqual(['a', 'b']);
+  });
   it('keeps the same group cursor usable after buffered content is activated', async () => {
     const head = { ...record(0, ['a']), bufferedObservationChunks: [chunk(group('b') + group('c'))] };
     const om = history([head]);
