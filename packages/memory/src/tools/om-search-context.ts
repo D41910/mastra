@@ -50,8 +50,8 @@ export function sourceRangeOverlapsContext({
   if (!match.groupId || !match.range) return false;
   const endpoints = /^([^:,]+):([^:,]+)$/.exec(match.range);
   if (!endpoints) return false;
-  // A group spans one observed batch. Once observed, everything before its last message is pruned and
-  // that message is trimmed to later parts, so a lone endpoint does not mean the group's content is visible.
+  // Fallback for when the current OM record can't be read. A group's messages normally leave context
+  // together, so a lone endpoint is a message kept back, such as a tool call awaiting its result.
   const visible = new Set(messages.filter(message => message.threadId === match.threadId).map(message => message.id));
   return visible.has(endpoints[1]!) && visible.has(endpoints[2]!);
 }

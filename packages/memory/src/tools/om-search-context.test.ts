@@ -66,6 +66,52 @@ const hit = (groupId: string, text: string, range?: string): RecallSearchResult 
 const excerpts = (text: string) => [...text.matchAll(/```text\n([\s\S]*?)\n```/g)].map(match => match[1]!);
 
 describe('execution-time recall search context', () => {
+  describe('groups already in the current observational memory', () => {
+    const group = (id: string, text: string) =>
+      `<observation-group id="${id}" range="start-${id}:end-${id}">\n${text}\n</observation-group>`;
+    const searchWithRecord = async (record: {
+      activeObservations: string;
+      bufferedObservationChunks?: { observations: string }[];
+    }) => {
+      const { memory } = setup([
+        hit('active', 'active text'),
+        hit('buffered', 'buffered text'),
+        hit('old', 'old text'),
+      ]);
+      const getHistory = vi.fn(async (_threadId: string, _resourceId: string, _limit?: number, options?: object) =>
+        options && 'groupId' in options
+          ? []
+          : [{ id: 'current', generationCount: 3, observedTimezone: null, threadId, ...record }],
+      );
+      const result = await searchMessagesForResource({
+        memory,
+        om: { getHistory } as never,
+        resourceId,
+        currentThreadId: threadId,
+        query: 'topic',
+        currentMessages: [],
+      });
+      return { result, getHistory };
+    };
+
+    it('compacts groups in active observations or unactivated buffered chunks, not reflected ones', async () => {
+      const { result, getHistory } = await searchWithRecord({
+        activeObservations: `<observation-group id="reflection" range="a:b" kind="reflection">\nsummary\n</observation-group>\n${group('active', 'active text')}`,
+        bufferedObservationChunks: [{ observations: group('buffered', 'buffered text') }],
+      });
+      expect(excerpts(result.results)).toEqual(['old text']);
+      expect(result.results.match(/Group already in current context\./g)).toHaveLength(2);
+      expect(getHistory).toHaveBeenCalledWith(threadId, resourceId, 1);
+      expect(getHistory.mock.calls.filter(call => call.length === 3 || !call[3])).toHaveLength(1);
+    });
+
+    it('keeps excerpts when the current record holds none of the hits', async () => {
+      const { result } = await searchWithRecord({ activeObservations: group('other', 'other text') });
+      expect(excerpts(result.results)).toEqual(['active text', 'buffered text', 'old text']);
+      expect(result.results).not.toContain('Group already in current context');
+    });
+  });
+
   it('backfills covered hits with the next ranked groups and keeps compact references', async () => {
     const known = [hit('a', 'known A'), hit('b', 'known B')];
     const previous = await setup(known).search();
@@ -289,8 +335,7 @@ describe('execution-time recall search context', () => {
     expect(excerpts((await search()).results)).toEqual(['summary']);
   });
 
-  // After a group is observed, pruning removes everything before its last message and trims that
-  // message to parts added after the observation marker, so a lone endpoint no longer holds the group's content.
+  // A lone endpoint is a message kept back after its group left context, such as a tool call awaiting its result.
   it.each(['start', 'end'])('keeps the excerpt when only its %s endpoint is visible', async endpoint => {
     const { search, memory } = setup([hit('a', 'summary', 'start:end')]);
     const result = await search([message(endpoint)]);

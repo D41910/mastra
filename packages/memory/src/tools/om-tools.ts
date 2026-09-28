@@ -9,6 +9,7 @@ import {
   formatRelativeTime,
   resolveTimeZone,
 } from '../processors/observational-memory/date-utils';
+import { parseObservationGroups } from '../processors/observational-memory/observation-groups';
 import { safeSlice } from '../processors/observational-memory/string-utils';
 import {
   formatToolResultForObserver,
@@ -427,6 +428,18 @@ export async function searchMessagesForResource({
   }
 
   const visibleExcerpts = getVisibleSearchExcerpts(currentMessages);
+  // Groups in the current record are already in context: active ones as observations,
+  // unactivated buffered ones as their raw messages. Reflected-away groups are not.
+  const contextGroupIds = new Set<string>();
+  if (om && currentThreadId) {
+    const [current] = await om.getHistory(currentThreadId, resourceId, 1);
+    for (const observations of [
+      current?.activeObservations ?? '',
+      ...(current?.bufferedObservationChunks ?? []).map(chunk => chunk.observations),
+    ]) {
+      for (const group of parseObservationGroups(observations)) contextGroupIds.add(group.id);
+    }
+  }
   const suppressCoveredEntry = (entry: (typeof ordered)[number]) => {
     if (!entry.match.groupId) return;
     if (
@@ -434,6 +447,8 @@ export async function searchMessagesForResource({
       visibleExcerpts.get(searchContextKey(entry.match))?.some(text => text.includes(entry.excerptContent))
     ) {
       entry.suppression = 'Excerpt already in current context.';
+    } else if (contextGroupIds.has(entry.match.groupId)) {
+      entry.suppression = 'Group already in current context.';
     } else if (sourceRangeOverlapsContext({ match: entry.match, messages: currentMessages })) {
       entry.suppression = 'Source range overlaps current context.';
     }
