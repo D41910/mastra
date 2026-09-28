@@ -225,7 +225,7 @@ export async function pageObservationGroups({
         : '— End of retained observation history for this thread. —',
   );
   text.unshift(
-    `### Observation page\nThread: ${JSON.stringify(threadTitle ?? threadId)}\nShowing ${page.length} groups ${requestedDirection === undefined ? 'starting at' : `strictly ${direction}`} \`${groupId}\` (oldest first).`,
+    `### Observation page\nThread: ${threadTitle || '(untitled)'}\nShowing ${page.length} groups ${requestedDirection === undefined ? 'starting at' : `strictly ${direction}`} \`${groupId}\` (oldest first).`,
   );
   return { results: text.join('\n\n'), count: page.length, hasMore };
 }

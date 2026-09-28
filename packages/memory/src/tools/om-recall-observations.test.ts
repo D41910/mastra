@@ -187,12 +187,23 @@ describe('recall observations integration', () => {
     } as any)) as any;
     expect(result.count).toBe(2);
     expect(result.hasMore).toBe(true);
-    expect(result.results).toContain('Thread: "History"');
+    expect(result.results).toContain('Thread: History\n');
     expect(result.results).toContain('Showing 2 groups starting at `a` (oldest first)');
     expect(result.results).toContain('## Group `a`');
     expect(result.results).toContain('## Group `b`');
     expect(result.results).not.toContain('"threadId"');
     expect(result.results).toContain('"groupId":"b","direction":"after"');
+  });
+  it('labels an untitled thread the same way search results do', async () => {
+    const { memory, om } = setup();
+    vi.mocked(memory.getThreadById!).mockResolvedValueOnce({ ...thread, title: '' });
+    const tool = recallTool(undefined, { getOMEngine: () => om });
+    const result = (await tool.execute?.({ mode: 'observations', groupId: 'a', limit: 1 }, {
+      memory,
+      agent: { threadId: 'thread', resourceId: 'resource' },
+    } as any)) as any;
+    expect(result.results).toContain('Thread: (untitled)\n');
+    expect(result.results).not.toContain('Thread: ""');
   });
   describe('messages newer than the last observation', () => {
     const endAt = new Date('2024-01-03T12:00:00Z');
