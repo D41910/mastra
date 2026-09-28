@@ -95,6 +95,23 @@ export function gapMarkerBetween(
   return `— ${count} between these results; continue with ${page} —`;
 }
 
+/** Messages after the last observed range are raw history only; say so instead of implying the thread ends. */
+async function newerMessagesNote(
+  group: ObservationGroup | undefined,
+  countNewerMessages: ((cursor: string) => Promise<number>) | undefined,
+  threadId: string | undefined,
+): Promise<string | null> {
+  const endpoints = group?.range.split(',').at(-1)?.split(':');
+  const cursor = endpoints?.length === 2 ? endpoints[1] : undefined;
+  if (!cursor || !countNewerMessages) return null;
+  const count = await countNewerMessages(cursor);
+  if (count <= 0) return null;
+  const call = `recall(${JSON.stringify({ mode: 'messages', threadId, cursor })})`;
+  return count === 1
+    ? `1 newer message has not been observed yet; read it with ${call}`
+    : `${count} newer messages have not been observed yet; read them with ${call}`;
+}
+
 export async function pageObservationGroups({
   om,
   threadId,
@@ -104,6 +121,7 @@ export async function pageObservationGroups({
   limit,
   threadTitle,
   includeThreadId = true,
+  countNewerMessages,
 }: {
   om: OMTimelineEngine;
   threadId: string;
@@ -113,6 +131,8 @@ export async function pageObservationGroups({
   limit: number;
   threadTitle?: string;
   includeThreadId?: boolean;
+  /** Counts the thread's messages created after the given message ID. */
+  countNewerMessages?: (cursor: string) => Promise<number>;
 }): Promise<{ results: string; count: number; hasMore?: boolean }> {
   const home = await findGroupTimeline(om, threadId, resourceId, groupId);
   if (!home)
@@ -161,12 +181,18 @@ export async function pageObservationGroups({
   const hasMore = entries.length > limit;
   const page = entries.slice(0, limit);
   if (direction === 'before') page.reverse();
-  if (!page.length)
+  const pagingThreadId = includeThreadId ? threadId : undefined;
+  if (!page.length) {
+    const note =
+      direction === 'after'
+        ? await newerMessagesNote(home.groups[home.indexById.get(groupId)!], countNewerMessages, pagingThreadId)
+        : null;
     return {
-      results: `No ${direction === 'before' ? 'earlier' : 'later'} original observation groups in this thread's retained history.`,
+      results: `No ${direction === 'before' ? 'earlier' : 'later'} original observation groups in this thread's retained history.${note ? ` ${note}.` : ''}`,
       count: 0,
       hasMore: false,
     };
+  }
   const now = new Date();
   const text = page.map(({ group, record }) =>
     [
@@ -185,7 +211,7 @@ export async function pageObservationGroups({
           (await pageObservationGroups({ om, threadId, resourceId, groupId, direction: 'before', limit: 1 })).count >
             0);
   const hasLater = direction === 'before' || hasMore;
-  const pagingThreadId = includeThreadId ? threadId : undefined;
+  const newer = hasLater ? null : await newerMessagesNote(page.at(-1)!.group, countNewerMessages, pagingThreadId);
   text.unshift(
     hasEarlier
       ? `— Browse earlier: ${pagingCall(page[0]!.group.id, 'before', pagingThreadId)} —`
@@ -194,7 +220,9 @@ export async function pageObservationGroups({
   text.push(
     hasLater
       ? `— Browse later: ${pagingCall(page.at(-1)!.group.id, 'after', pagingThreadId)} —`
-      : '— End of retained observation history for this thread. —',
+      : newer
+        ? `— End of observation history for this thread. ${newer} —`
+        : '— End of retained observation history for this thread. —',
   );
   text.unshift(
     `### Observation page\nThread: ${JSON.stringify(threadTitle ?? threadId)}\nShowing ${page.length} groups ${requestedDirection === undefined ? 'starting at' : `strictly ${direction}`} \`${groupId}\` (oldest first).`,

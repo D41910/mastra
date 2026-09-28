@@ -194,6 +194,71 @@ describe('recall observations integration', () => {
     expect(result.results).not.toContain('"threadId"');
     expect(result.results).toContain('"groupId":"b","direction":"after"');
   });
+  describe('messages newer than the last observation', () => {
+    const endAt = new Date('2024-01-03T12:00:00Z');
+    const withTail = (total: number) => {
+      const { memory, om } = setup();
+      const end = {
+        id: 'c-end',
+        threadId: 'thread',
+        resourceId: 'resource',
+        role: 'user',
+        createdAt: endAt,
+        content: { format: 2, parts: [] },
+      };
+      memory.getMemoryStore = async () => ({
+        listMessagesById: async ({ messageIds }) => ({ messages: messageIds.includes('c-end') ? [end as never] : [] }),
+      });
+      const recall = vi.fn(async (_args: Parameters<RecallMemory['recall']>[0]) => ({
+        messages: [],
+        total,
+        page: 0,
+        perPage: 1,
+        hasMore: false,
+      }));
+      memory.recall = recall;
+      const tool = recallTool(undefined, { getOMEngine: () => om });
+      const page = async (args: Record<string, unknown>) =>
+        (
+          (await tool.execute?.(
+            { mode: 'observations', ...args } as any,
+            {
+              memory,
+              agent: { threadId: 'thread', resourceId: 'resource' },
+            } as any,
+          )) as any
+        ).results as string;
+      return { page, recall };
+    };
+
+    it('points to unobserved messages when paging reaches the end of observations', async () => {
+      const { page, recall } = withTail(3);
+      const results = await page({ groupId: 'b', limit: 5 });
+      expect(results).toContain('## Group `c`');
+      expect(results).toContain(
+        '— End of observation history for this thread. 3 newer messages have not been observed yet; read them with recall({"mode":"messages","cursor":"c-end"}) —',
+      );
+      expect(recall).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'thread', filter: { dateRange: { start: endAt, startExclusive: true } } }),
+      );
+    });
+
+    it('points to unobserved messages from an empty later page', async () => {
+      const { page } = withTail(1);
+      const results = await page({ groupId: 'c', direction: 'after' });
+      expect(results).toContain('No later original observation groups');
+      expect(results).toContain(
+        '1 newer message has not been observed yet; read it with recall({"mode":"messages","cursor":"c-end"})',
+      );
+    });
+
+    it('keeps the plain end marker when every message is observed', async () => {
+      const { page } = withTail(0);
+      const results = await page({ groupId: 'b', limit: 5 });
+      expect(results).toContain('— End of retained observation history for this thread. —');
+      expect(results).not.toContain('newer message');
+    });
+  });
   it('rejects a cross-resource thread before fetching observations', async () => {
     const { memory, om } = setup();
     const tool = recallTool(undefined, { retrievalScope: 'resource', getOMEngine: () => om });

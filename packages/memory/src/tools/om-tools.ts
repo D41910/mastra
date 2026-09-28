@@ -1710,6 +1710,20 @@ export const recallTool = (
           limit: Math.min(Math.max(limit ?? 5, 1), 20),
           threadTitle: thread.title,
           includeThreadId: isResourceScope,
+          countNewerMessages: async cursor => {
+            const store = await memory.getMemoryStore();
+            const end = (await store.listMessagesById({ messageIds: [cursor] })).messages.find(m => m.id === cursor);
+            if (!end || end.threadId !== pagingThreadId) return 0;
+            const { total } = await memory.recall({
+              threadId: pagingThreadId,
+              resourceId,
+              page: 0,
+              perPage: 1,
+              orderBy: { field: 'createdAt', direction: 'ASC' },
+              filter: { dateRange: { start: end.createdAt, startExclusive: true } },
+            });
+            return total;
+          },
         });
       }
 
