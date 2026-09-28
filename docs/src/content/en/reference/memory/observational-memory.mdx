@@ -1214,14 +1214,13 @@ Reflected groups appear in the actor's context with `_kind: reflection_`. The in
 
 ### Observation pages
 
-With vector search configured, `mode: "observations"` reads original observation groups around a search hit. Copy its `groupId`, in resource scope its `threadId`, and its `record` as `recordId` when the hit shows one:
+With vector search configured, `mode: "observations"` reads original observation groups around a search hit. Copy its `groupId` exactly as shown and, in resource scope, its `threadId`:
 
 ```json
 {
   "mode": "observations",
   "threadId": "source-thread-id",
   "groupId": "group-id-from-search",
-  "recordId": "record-id-from-search",
   "direction": "after",
   "limit": 5
 }
@@ -1243,7 +1242,7 @@ Relative dates use the current thread's time zone in search and the record's tim
 
 Paging includes persisted buffered observations that search has indexed, even before they become active. Reading a page does not activate or modify the buffer.
 
-Newly indexed groups store the ID of the observational memory record that holds them. Search shows it as `record`, and continuation calls include it as `recordId`, so paging reads that one record by ID. Groups indexed before this, hints that no longer match (for example, a buffered group that reflection moved to a newer record), and calls without `recordId` fall back to scanning the thread's stored observation text, so their latency depends on the size of the retained history. Existing retained records with observation-group tags work without re-indexing. Upgrade the storage adapter along with `@mastra/memory`; adapters must support record, group, and generation filters in observation history. Missing tags or deleted generations cannot be recovered by paging.
+Newly indexed groups store the ID of the observational memory record that holds them. Search results and continuation calls show group IDs with that record ID attached (`groupId@recordId`), so paging reads that one record by ID. Groups indexed before this, record IDs that no longer match (for example, a buffered group that reflection moved to a newer record), and plain group IDs fall back to scanning the thread's stored observation text, so their latency depends on the size of the retained history. Existing retained records with observation-group tags work without re-indexing. Upgrade the storage adapter along with `@mastra/memory`; adapters must support record, group, and generation filters in observation history. Missing tags or deleted generations cannot be recovered by paging.
 
 ### Parameters
 
@@ -1262,14 +1261,7 @@ Newly indexed groups store the ID of the observational memory record that holds 
     type: 'string',
     isOptional: true,
     description:
-      'Required for observations mode. Copy the observation group ID from a search result or observation page.',
-  },
-  {
-    name: 'recordId',
-    type: 'string',
-    isOptional: true,
-    description:
-      'For observations mode. The record ID shown with a search hit or included in a continuation call. Lets paging read that record directly instead of scanning the observation history.',
+      'Required for observations mode. Copy the observation group ID exactly from a search result or continuation call. IDs shown as `groupId@recordId` let paging read the record directly; a plain group ID also works.',
   },
   {
     name: 'direction',

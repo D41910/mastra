@@ -264,10 +264,10 @@ describe('observation group history', () => {
       const page = await pageObservationGroups({ om, ...args, groupId: 'c' });
       expect(ids(page.results)).toEqual(['c', 'd', 'e']);
       expect(page.results).toContain(
-        'recall({"mode":"observations","threadId":"thread","groupId":"c","direction":"before","recordId":"generation-0"})',
+        'recall({"mode":"observations","threadId":"thread","groupId":"c@generation-0","direction":"before"})',
       );
       expect(page.results).toContain(
-        'recall({"mode":"observations","threadId":"thread","groupId":"e","direction":"after","recordId":"generation-1"})',
+        'recall({"mode":"observations","threadId":"thread","groupId":"e@generation-1","direction":"after"})',
       );
     });
   });

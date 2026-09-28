@@ -17,7 +17,7 @@ import {
   resolveToolResultValue,
   truncateStringByTokens,
 } from '../processors/observational-memory/tool-result-helpers';
-import { pageObservationGroups, pagingCall } from './om-observations';
+import { groupCursor, pageObservationGroups, pagingCall, parseGroupCursor } from './om-observations';
 import type { OMTimelineEngine } from './om-observations';
 import { getVisibleSearchExcerpts, searchContextKey, sourceRangeOverlapsContext } from './om-search-context';
 
@@ -542,8 +542,7 @@ export async function searchMessagesForResource({
     const sourceLine = match.range
       ? `- source: raw messages from ID ${match.range.split(':')[0] ?? '(unknown)'} through ID ${match.range.split(':')[1] ?? '(unknown)'}`
       : '- source: raw message range unavailable';
-    const groupLine = match.groupId ? `- observation group: ${match.groupId}` : undefined;
-    const recordLine = match.groupId && match.recordId ? `- record: ${match.recordId}` : undefined;
+    const groupLine = match.groupId ? `- observation group: ${groupCursor(match.groupId, match.recordId)}` : undefined;
     const scoreLine = `- score: ${match.score.toFixed(2)}`;
 
     const prev = i > 0 ? ordered[i - 1]!.match : undefined;
@@ -566,7 +565,6 @@ export async function searchMessagesForResource({
         observedLine,
         sourceLine,
         groupLine,
-        recordLine,
         scoreLine,
         '',
         '```text',
@@ -584,7 +582,7 @@ export async function searchMessagesForResource({
       [
         `All ${ordered.length} selected matching groups are shown; some excerpts are truncated.`,
         om
-          ? 'To read a full group, use mode="observations" with its threadId, groupId, and record (as recordId), omitting direction.'
+          ? 'To read a full group, use mode="observations" with its threadId and groupId, omitting direction.'
           : undefined,
         'Use mode="messages" with a source-range cursor for original messages.',
       ]
@@ -1514,13 +1512,7 @@ export const recallTool = (
                 type: 'string',
                 minLength: 1,
                 description:
-                  'Observation group ID to page around, for mode="observations". Copy it from the "observation group:" line of a search result.',
-              },
-              recordId: {
-                type: 'string',
-                minLength: 1,
-                description:
-                  'For mode="observations": the record ID shown with a search hit or in a continuation call. Optional; it lets the group be read directly.',
+                  'Observation group ID to page around, for mode="observations". Copy it exactly from the "observation group:" line of a search result or a continuation call.',
               },
               direction: {
                 type: 'string',
@@ -1592,7 +1584,6 @@ export const recallTool = (
         mode,
         query,
         groupId,
-        recordId,
         direction,
         cursor,
         threadId: explicitThreadId,
@@ -1610,7 +1601,6 @@ export const recallTool = (
         mode?: 'messages' | 'threads' | 'search' | 'observations';
         query?: string;
         groupId?: string;
-        recordId?: string;
         direction?: 'before' | 'after';
         cursor?: string;
         threadId?: string;
@@ -1669,8 +1659,7 @@ export const recallTool = (
           om,
           threadId: pagingThreadId,
           resourceId,
-          groupId,
-          recordId,
+          ...parseGroupCursor(groupId),
           direction,
           limit: Math.min(Math.max(limit ?? 5, 1), 20),
           threadTitle: thread.title,

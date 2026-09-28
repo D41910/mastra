@@ -173,16 +173,17 @@ describe('recall observations integration', () => {
     );
     expect(result.results).not.toMatch(/\d+\+? observation groups hidden/);
   });
-  it('prints record IDs so paging can skip the history scan', async () => {
+  it('attaches record IDs to group IDs so paging can skip the history scan', async () => {
     const { memory, om } = setup();
     const search = memory.searchMessages!;
     memory.searchMessages = async input => ({
       results: (await search(input)).results.map(hit => ({ ...hit, recordId: `record-${hit.groupId}` })),
     });
     const result = await searchMessagesForResource({ memory, om, resourceId: 'resource', query: 'x', topK: 2 });
-    expect(result.results).toContain('- observation group: a\n- record: record-a\n');
+    expect(result.results).toContain('- observation group: a@record-a\n');
+    expect(result.results).not.toContain('- record:');
     expect(result.results).toContain(
-      'continue with recall({"mode":"observations","threadId":"thread","groupId":"a","direction":"after","recordId":"record-a"})',
+      'continue with recall({"mode":"observations","threadId":"thread","groupId":"a@record-a","direction":"after"})',
     );
   });
   it('reads observational memory history at most once per search, however many hits', async () => {
@@ -231,7 +232,7 @@ describe('recall observations integration', () => {
     expect(result.results).toContain('## Group `a`');
     expect(result.results).toContain('## Group `b`');
     expect(result.results).not.toContain('"threadId"');
-    expect(result.results).toContain('"groupId":"b","direction":"after"');
+    expect(result.results).toContain('"groupId":"b@record","direction":"after"');
   });
   it('labels an untitled thread the same way search results do', async () => {
     const { memory, om } = setup();
@@ -349,5 +350,19 @@ describe('recall observations integration', () => {
     expect(result.count).toBe(0);
     expect(result.results).toContain('storage adapter');
     expect(store.getObservationalMemoryHistory).not.toHaveBeenCalled();
+  });
+  it('reads the record named in a group ID instead of scanning the history', async () => {
+    const { memory, om } = setup();
+    const tool = recallTool(undefined, {
+      retrievalScope: 'thread',
+      searchEnabled: true,
+      getOMEngine: async () => om as never,
+    });
+    const result = (await tool.execute!(
+      { mode: 'observations', groupId: 'b@record' } as never,
+      { memory, agent: { threadId: 'thread', resourceId: 'resource' } } as never,
+    )) as { results: string };
+    expect(result.results).toContain('## Group `b`');
+    expect(om.getHistory).toHaveBeenNthCalledWith(1, 'thread', 'resource', 1, { recordId: 'record', groupId: 'b' });
   });
 });

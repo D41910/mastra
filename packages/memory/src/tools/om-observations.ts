@@ -63,13 +63,25 @@ export async function findGroupTimeline(
   return (recordId !== undefined && (await resolve({ recordId }))) || (await resolve({ sortDirection: 'ASC' }));
 }
 
+/** Group IDs shown to the agent carry the record holding the group, so paging can read it by ID. */
+export function groupCursor(groupId: string, recordId?: string): string {
+  return recordId ? `${groupId}@${recordId}` : groupId;
+}
+
+export function parseGroupCursor(cursor: string): { groupId: string; recordId?: string } {
+  const at = cursor.indexOf('@');
+  return at === -1
+    ? { groupId: cursor }
+    : { groupId: cursor.slice(0, at), recordId: cursor.slice(at + 1) || undefined };
+}
+
 export function pagingCall(
   groupId: string,
   direction: 'before' | 'after',
   threadId?: string,
   recordId?: string,
 ): string {
-  return `recall(${JSON.stringify({ mode: 'observations', threadId, groupId, direction, recordId })})`;
+  return `recall(${JSON.stringify({ mode: 'observations', threadId, groupId: groupCursor(groupId, recordId), direction })})`;
 }
 
 /** Messages after the last observed range are raw history only; say so instead of implying the thread ends. */
@@ -105,7 +117,7 @@ export async function pageObservationGroups({
   threadId: string;
   resourceId: string;
   groupId: string;
-  /** Record that holds the group, from a search hit or continuation call. */
+  /** Record that holds the group, parsed from the group ID the agent copied. */
   recordId?: string;
   direction?: 'before' | 'after';
   limit: number;

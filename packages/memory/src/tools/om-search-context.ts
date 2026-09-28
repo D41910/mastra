@@ -27,7 +27,8 @@ export function getVisibleSearchExcerpts(messages: readonly MastraDBMessage[]): 
       if (!value || typeof value !== 'object' || !('results' in value) || typeof value.results !== 'string') continue;
       for (const section of value.results.split(/^### (?:Current thread memory|Memory from another thread)\s*$/m)) {
         const threadId = /^- thread: (\S+)/m.exec(section)?.[1];
-        const groupId = /^- observation group: ([^\n]+)$/m.exec(section)?.[1];
+        const cursor = /^- observation group: ([^\n]+)$/m.exec(section)?.[1];
+        const groupId = cursor?.split('@')[0];
         const excerpt = /\n```text\n([\s\S]*?)\n```/.exec(section)?.[1];
         if (!threadId || !groupId || !excerpt) continue;
         const key = searchContextKey({ threadId, groupId });

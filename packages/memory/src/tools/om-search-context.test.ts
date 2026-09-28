@@ -275,6 +275,15 @@ describe('execution-time recall search context', () => {
     expect(memory.searchMessages).toHaveBeenCalledTimes(1);
   });
 
+  it('recognizes earlier results whose group IDs carry a record ID', async () => {
+    const a = { ...hit('a', 'previous evidence'), recordId: 'record-1' };
+    const previous = await setup([a]).search();
+    expect(previous.results).toContain('observation group: a@record-1\n');
+    const compact = await setup([a]).search([resultMessage(previous)]);
+    expect(compact.results).toContain(
+      'observation group: a@record-1\n  thread: thread; Excerpt already in current context.',
+    );
+  });
   it('compacts identical excerpts and spends the reclaimed allowance on fresh hits', async () => {
     const a = hit('a', 'previous evidence '.repeat(500));
     const b = hit('b', 'new evidence '.repeat(500));
