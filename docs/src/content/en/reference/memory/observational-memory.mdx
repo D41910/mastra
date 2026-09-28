@@ -1238,7 +1238,7 @@ Search keeps the compact references and checks lower-ranked candidates for addit
 
 These checks don't use a persistent seen-results cache. If earlier results or source messages leave the message list, a later search can show the excerpt again. Without access to the current message list, search returns normal excerpts. Request-stage transforms that only change the provider prompt aren't reflected in this check. Observation paging always returns the requested groups without this suppression.
 
-Relative dates use the record's time zone. Gap markers show exact counts within one generation and lower bounds such as `10+` across generations.
+Relative dates use the current thread's time zone in search and the record's time zone in paging. Between two search hits from the same thread, search adds a marker with the paging call that reads the groups in between. It doesn't count those groups, so search reads observational memory storage only once.
 
 Paging includes persisted buffered observations that search has indexed, even before they become active. Reading a page does not activate or modify the buffer.
 

@@ -17,7 +17,7 @@ import {
   resolveToolResultValue,
   truncateStringByTokens,
 } from '../processors/observational-memory/tool-result-helpers';
-import { findGroupTimeline, gapMarkerBetween, pageObservationGroups, pagingCall } from './om-observations';
+import { pageObservationGroups, pagingCall } from './om-observations';
 import type { OMTimelineEngine } from './om-observations';
 import { getVisibleSearchExcerpts, searchContextKey, sourceRangeOverlapsContext } from './om-search-context';
 
@@ -404,21 +404,21 @@ export async function searchMessagesForResource({
     entry.excerptContent = selected.content;
   };
 
+  // One history read per search: the current record supplies the user's timezone and
+  // the groups already in context. Hits are not resolved to their own generations.
+  const [currentRecord] = om && currentThreadId ? await om.getHistory(currentThreadId, resourceId, 1) : [];
+  const timeZone = resolveTimeZone(currentRecord?.observedTimezone ?? undefined);
+
   // Reserve an excerpt for every hit before distributing spare space in similarity order.
   // Metadata and navigation do not consume the observation-text allowance.
-  const prepareEntry = async (match: RecallSearchResult, index: number, budget: number) => {
-    const timeline =
-      om && match.groupId && threadMap.get(match.threadId)?.resourceId === resourceId
-        ? await findGroupTimeline(om, match.threadId, resourceId, match.groupId)
-        : null;
-    const timeZone = resolveTimeZone(timeline?.record.observedTimezone ?? undefined);
+  const prepareEntry = (match: RecallSearchResult, index: number, budget: number) => {
     const rawBody = (match.text || '').trim() || '_Observation text unavailable._';
     const body = match.groupId ? addRelativeTimeToObservations(rawBody, now, timeZone) : rawBody;
-    const entry = { match, index, timeline, body, excerpt: '', excerptContent: '', suppression: '' };
+    const entry = { match, index, body, excerpt: '', excerptContent: '', suppression: '' };
     setExcerpt(entry, budget);
     return entry;
   };
-  const ordered = await Promise.all(limitedMatches.map((match, index) => prepareEntry(match, index, perGroupBudget)));
+  const ordered = limitedMatches.map((match, index) => prepareEntry(match, index, perGroupBudget));
   let remaining = contentBudget - ordered.reduce((sum, entry) => sum + estimateTokenCount(entry.excerpt), 0);
   for (const entry of ordered) {
     if (remaining <= 0) break;
@@ -432,14 +432,11 @@ export async function searchMessagesForResource({
   // Groups in the current record are already in context: active ones as observations,
   // unactivated buffered ones as their raw messages. Reflected-away groups are not.
   const contextGroupIds = new Set<string>();
-  if (om && currentThreadId) {
-    const [current] = await om.getHistory(currentThreadId, resourceId, 1);
-    for (const observations of [
-      current?.activeObservations ?? '',
-      ...getBufferedChunks(current).map(chunk => chunk.observations),
-    ]) {
-      for (const group of parseObservationGroups(observations)) contextGroupIds.add(group.id);
-    }
+  for (const observations of [
+    currentRecord?.activeObservations ?? '',
+    ...getBufferedChunks(currentRecord).map(chunk => chunk.observations),
+  ]) {
+    for (const group of parseObservationGroups(observations)) contextGroupIds.add(group.id);
   }
   const suppressCoveredEntry = (entry: (typeof ordered)[number]) => {
     if (!entry.match.groupId) return;
@@ -488,7 +485,7 @@ export async function searchMessagesForResource({
           const thread = await memory.getThreadById({ threadId: match.threadId });
           if (thread) threadMap.set(match.threadId, thread);
         }
-        const entry = await prepareEntry(match, ordered.length, backfillBudget);
+        const entry = prepareEntry(match, ordered.length, backfillBudget);
         suppressCoveredEntry(entry);
         ordered.push(entry);
         if (!entry.suppression) freshCount++;
@@ -517,16 +514,8 @@ export async function searchMessagesForResource({
     const bt = b.match.observedAt?.getTime() ?? Number.POSITIVE_INFINITY;
     if (at !== bt) return at < bt ? -1 : 1;
     if (a.match.threadId !== b.match.threadId) return a.match.threadId.localeCompare(b.match.threadId);
-    if (Boolean(a.timeline) !== Boolean(b.timeline)) return a.timeline ? -1 : 1;
-    if (a.timeline && b.timeline) {
-      return (
-        a.timeline.record.generationCount - b.timeline.record.generationCount ||
-        a.timeline.indexById.get(a.match.groupId!)! - b.timeline.indexById.get(b.match.groupId!)!
-      );
-    }
     return a.index - b.index;
   });
-  const timelines = ordered.map(entry => entry.timeline);
 
   const sections: string[] = [];
   const compactCount = ordered.length - freshCount;
@@ -538,7 +527,6 @@ export async function searchMessagesForResource({
   }
   for (let i = 0; i < ordered.length; i++) {
     const { match, body, excerpt, suppression } = ordered[i]!;
-    const timeline = timelines[i]!;
     const thread = threadMap.get(match.threadId);
     const title = thread?.title || '(untitled)';
     const isCurrentThread = match.threadId === currentThreadId;
@@ -547,7 +535,6 @@ export async function searchMessagesForResource({
       ? 'This result came from the current thread.'
       : 'This result came from another thread.';
     const threadLine = `- thread: ${match.threadId}${thread ? ` (${title})` : ''}`;
-    const timeZone = resolveTimeZone(timeline?.record.observedTimezone ?? undefined);
     const observedLine = match.observedAt
       ? `- observed: ${formatTimestamp(match.observedAt)} (${formatRelativeTime(match.observedAt, now, timeZone)})`
       : undefined;
@@ -557,16 +544,11 @@ export async function searchMessagesForResource({
     const groupLine = match.groupId ? `- observation group: ${match.groupId}` : undefined;
     const scoreLine = `- score: ${match.score.toFixed(2)}`;
 
-    if (i > 0) {
-      const prev = ordered[i - 1]!;
-      const marker = gapMarkerBetween(
-        { threadId: prev.match.threadId, groupId: prev.match.groupId },
-        { threadId: match.threadId, groupId: match.groupId },
-        timelines[i - 1]!,
-        timeline,
-        !threadScope,
+    const prev = i > 0 ? ordered[i - 1]!.match : undefined;
+    if (om && prev?.groupId && match.groupId && prev.threadId === match.threadId) {
+      sections.push(
+        `— Observation groups may be hidden between these results; continue with ${pagingCall(prev.groupId, 'after', threadScope ? undefined : prev.threadId)} —`,
       );
-      if (marker) sections.push(marker);
     }
 
     if (suppression) {
@@ -592,35 +574,6 @@ export async function searchMessagesForResource({
         .filter(Boolean)
         .join('\n'),
     );
-  }
-
-  // Edge markers: how much history lies outside the result set. Only exact when every
-  // resolved hit shares one generation; otherwise the model can page from an edge hit.
-  const resolved = ordered
-    .map((entry, i) => ({ entry, timeline: timelines[i] }))
-    .filter(item => item.timeline && item.entry.match.groupId);
-  const singleTimeline =
-    resolved.length === ordered.length &&
-    resolved.every(
-      item =>
-        item.timeline!.record.id === resolved[0]!.timeline!.record.id &&
-        item.entry.match.threadId === resolved[0]!.entry.match.threadId,
-    );
-  if (singleTimeline) {
-    const timeline = resolved[0]!.timeline!;
-    const firstIndex = timeline.indexById.get(ordered[0]!.match.groupId ?? '');
-    const lastIndex = timeline.indexById.get(ordered.at(-1)!.match.groupId ?? '');
-    if (firstIndex !== undefined && firstIndex > 0 && ordered[0]!.match.groupId) {
-      sections.unshift(
-        `— ${firstIndex}${timeline.record.generationCount > 0 ? '+' : ''} earlier observation groups not shown — page back with ${pagingCall(ordered[0]!.match.groupId, 'before', threadScope ? undefined : ordered[0]!.match.threadId)} —`,
-      );
-    }
-    if (lastIndex !== undefined && lastIndex < timeline.groups.length - 1 && ordered.at(-1)!.match.groupId) {
-      const afterCount = timeline.groups.length - lastIndex - 1;
-      sections.push(
-        `— ${afterCount}+ later observation groups not shown — page forward with ${pagingCall(ordered.at(-1)!.match.groupId!, 'after', threadScope ? undefined : ordered.at(-1)!.match.threadId)} —`,
-      );
-    }
   }
 
   if (ordered.some(entry => !entry.suppression && entry.excerpt !== entry.body)) {

@@ -32,7 +32,12 @@ function setup() {
     })),
   };
   const om: OMTimelineEngine = {
-    getHistory: vi.fn(async (_thread, _resource, _limit, options) => {
+    getHistory: vi.fn(async (thread, _resource, _limit, options) => {
+      if (thread === 'current') {
+        return [
+          { id: 'current', threadId: 'current', generationCount: 0, observedTimezone: 'UTC', activeObservations: '' },
+        ];
+      }
       if (options?.beforeGeneration !== undefined || options?.afterGeneration !== undefined) return [];
       return [
         {
@@ -54,18 +59,25 @@ describe('recall observations integration', () => {
     vi.setSystemTime(new Date('2024-01-04T01:00:00Z'));
     try {
       const { memory, om } = setup();
-      const result = await searchMessagesForResource({ memory, om, resourceId: 'resource', query: 'topic', topK: 2 });
+      const result = await searchMessagesForResource({
+        memory,
+        om,
+        resourceId: 'resource',
+        currentThreadId: 'current',
+        query: 'topic',
+        topK: 2,
+      });
       expect(result.count).toBe(2);
       expect(result.results.indexOf('observation group: a')).toBeLessThan(
         result.results.indexOf('observation group: c'),
       );
       expect(result.results).not.toContain('observation group: b');
-      expect(result.results).toContain('1 observation groups hidden');
+      expect(result.results).toContain('Observation groups may be hidden between these results');
       expect(result.results).toContain('observed: 2024-01-01 12:00:00Z (3 days ago)');
       expect(result.results).toContain('Date: Jan 1, 2024 (3 days ago)');
       expect(result.results).not.toContain('thread updated');
-      expect(om.getHistory).toHaveBeenCalledTimes(2);
-      expect(om.getHistory).toHaveBeenCalledWith('thread', 'resource', 1, { groupId: 'a', sortDirection: 'ASC' });
+      expect(om.getHistory).toHaveBeenCalledTimes(1);
+      expect(om.getHistory).toHaveBeenCalledWith('current', 'resource', 1);
     } finally {
       vi.useRealTimers();
     }
@@ -157,8 +169,23 @@ describe('recall observations integration', () => {
     expect(result.results).toContain('observation group: a');
     expect(result.results).toContain('observation group: c');
     expect(result.results).toContain(
-      '1 observation groups hidden between these results; continue with recall({"mode":"observations","threadId":"thread","groupId":"a","direction":"after"})',
+      'Observation groups may be hidden between these results; continue with recall({"mode":"observations","threadId":"thread","groupId":"a","direction":"after"})',
     );
+    expect(result.results).not.toMatch(/\d+\+? observation groups hidden/);
+  });
+  it('reads observational memory history at most once per search, however many hits', async () => {
+    const { memory, om } = setup();
+    const result = await searchMessagesForResource({
+      memory,
+      om,
+      resourceId: 'resource',
+      currentThreadId: 'current',
+      query: 'x',
+      topK: 3,
+    });
+    expect(result.results).toContain('observation group: a');
+    expect(result.results).not.toContain('already in current context');
+    expect(vi.mocked(om.getHistory)).toHaveBeenCalledTimes(1);
   });
   it('does not add truncation guidance when every hit fits', async () => {
     const { memory } = setup();

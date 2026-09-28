@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import xxhash from 'xxhash-wasm';
 import { wrapInObservationGroup } from '../processors/observational-memory/observation-groups';
-import { findGroupTimeline, gapMarkerBetween, pageObservationGroups } from './om-observations';
+import { findGroupTimeline, pageObservationGroups } from './om-observations';
 import type { OMGenerationRecord, OMTimelineEngine } from './om-observations';
 
 const group = (id: string, kind?: string) =>
@@ -226,23 +226,6 @@ describe('observation group history', () => {
     expect(ids(page.results)).toEqual(['a', 'b']);
     expect(page.results).not.toContain('secret');
     expect(await findGroupTimeline(om, 'thread', 'resource', 'secret')).toBeNull();
-  });
-  it('counts exact local gaps and conservative cross-generation gaps without duplicate carryover', async () => {
-    const om = history(generations());
-    const locate = (id: string) => findGroupTimeline(om, 'thread', 'resource', id);
-    const hit = (groupId: string) => ({ threadId: 'thread', groupId });
-    expect(gapMarkerBetween(hit('a'), hit('d'), await locate('a'), await locate('d'))).toContain(
-      '2 observation groups hidden',
-    );
-    expect(gapMarkerBetween(hit('b'), hit('f'), await locate('b'), await locate('f'))).toContain(
-      '3+ observation groups hidden',
-    );
-    expect(gapMarkerBetween(hit('c'), hit('f'), await locate('c'), await locate('f'))).toContain(
-      '2+ observation groups hidden',
-    );
-    expect(
-      gapMarkerBetween(hit('a'), { threadId: 'other', groupId: 'd' }, await locate('a'), await locate('d')),
-    ).toBeNull();
   });
   it('renders dates in each record timezone', async () => {
     vi.useFakeTimers();

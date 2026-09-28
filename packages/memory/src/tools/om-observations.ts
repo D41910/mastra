@@ -61,40 +61,6 @@ export function pagingCall(groupId: string, direction: 'before' | 'after', threa
   return `recall(${JSON.stringify({ mode: 'observations', threadId, groupId, direction })})`;
 }
 
-export function gapMarkerBetween(
-  prev: { threadId: string; groupId?: string },
-  next: { threadId: string; groupId?: string },
-  left: GroupTimeline | null,
-  right: GroupTimeline | null,
-  includeThreadId = true,
-): string | null {
-  if (prev.threadId !== next.threadId || !prev.groupId || !next.groupId || !left || !right) return null;
-  const leftIndex = left.indexById.get(prev.groupId);
-  const rightIndex = right.indexById.get(next.groupId);
-  if (leftIndex === undefined || rightIndex === undefined) return null;
-  const page = pagingCall(prev.groupId, 'after', includeThreadId ? prev.threadId : undefined);
-  // A carried group may also be in the later hit's home generation.
-  const carriedIndex = right.indexById.get(prev.groupId);
-  if (left.record.id === right.record.id && carriedIndex !== undefined) {
-    const count = rightIndex - carriedIndex - 1;
-    return count > 0 ? `— ${count} observation groups hidden between these results; continue with ${page} —` : null;
-  }
-  if (left.record.generationCount >= right.record.generationCount) return null;
-  // Count only disjoint known groups. Never add overlapping carried groups twice.
-  const laterIds = new Set(right.groups.map(group => group.id));
-  const known = new Set(
-    [
-      ...left.groups.slice(leftIndex + 1).filter(group => !laterIds.has(group.id)),
-      ...right.groups.slice(0, rightIndex).filter(group => {
-        const index = left.indexById.get(group.id);
-        return index === undefined || index > leftIndex;
-      }),
-    ].map(group => group.id),
-  );
-  const count = known.size ? `${known.size}+ observation groups hidden` : 'Additional observation groups may be hidden';
-  return `— ${count} between these results; continue with ${page} —`;
-}
-
 /** Messages after the last observed range are raw history only; say so instead of implying the thread ends. */
 async function newerMessagesNote(
   group: ObservationGroup | undefined,

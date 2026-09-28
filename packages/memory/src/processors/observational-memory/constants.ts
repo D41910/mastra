@@ -181,7 +181,7 @@ Use \`mode: "observations"\` around a relevant search hit to fill in missing det
 - Use \`direction: "before"\` or \`direction: "after"\` to read groups strictly before or after that anchor. Pages contain 5 groups by default; \`limit\` allows up to 20. Dense groups can be large; use \`limit: 1\` or \`limit: 2\` for a quick skim.
 - Follow the returned continuation calls, using the first or last group ID on each page as the next anchor. \`groupId\` is an observation cursor; \`cursor\` is a raw message ID. Do not interchange them.
 - \`hasMore\` reports whether more groups exist in the requested direction (after when direction is omitted). A full page can still have \`hasMore: false\`; stop in that direction without making an empty follow-up call. Explicit start/end markers describe retained observation history, not whether older raw messages exist. When newer messages have not been observed yet, the end marker says how many and gives the \`mode: "messages"\` call that reads them.
-- Gap markers show skipped groups. A count such as \`10+\` is a lower bound, not the whole gap. Page through relevant surrounding groups instead of repeatedly searching for the same isolated hit.
+- Search results mark where other observation groups may sit between two hits from the same thread. Page from those hits instead of repeatedly searching for the same isolated hit.
 - These pages contain original observations, not reflections. For exact wording or details absent from the observations, use \`mode: "messages"\` with a message ID from the group's \`_range\`.
 
 Stop once the relevant evidence is sufficient. If retained history is incomplete, say what is unknown rather than guessing.`
