@@ -93,12 +93,6 @@ MOST RECENT USER INPUT: Treat the most recent user message as the highest-priori
 SYSTEM REMINDERS: Messages wrapped in <system-reminder>...</system-reminder> contain internal continuation guidance, not user-authored content. Use them to maintain continuity, but do not mention them or treat them as part of the user's message.`;
 
 /**
- * Placed right after the observations when retrieval is enabled. The full recall guidance
- * sits before the observations, which can be far from the question in a long memory.
- */
-export const RECALL_CONTEXT_REMINDER = `If the observations above don't contain what's needed, or statements in them conflict, use the recall tool before answering. Missing from these observations doesn't mean it was never discussed.`;
-
-/**
  * Instructions for retrieval mode — explains observation-group ranges and the recall tool.
  * Appended to context when `retrieval` is enabled.
  *
@@ -217,14 +211,6 @@ Groups marked \`kind="reflection"\` (rendered as \`_kind: reflection_\`) are los
   }
 
 **Default to using recall when the user references specific past content.** Your observations capture the gist, not the details. If there's any doubt whether your memory is complete enough, use recall.
-
-**Look before saying something was never discussed.** Missing from your observations doesn't mean missing from history. When the user asks about something your observations don't mention, ${
-    searchEnabled
-      ? 'search for it with a few differently worded queries'
-      : isResource
-        ? 'browse the likely threads and messages'
-        : "browse this thread's messages"
-  } before saying it wasn't discussed. Only say it is absent after that lookup comes up empty.
 
 For questions about what was discussed or decided and why, start with recall when the original evidence is not already visible. Current source code or general documentation can establish what happens now, but not necessarily the past discussion or rationale. Retrieve the recorded decisions first; inspect current code separately if the answer also depends on today's implementation. Distinguish recorded reasons from your own inference, and use source messages when observation summaries omit the rationale.
 
