@@ -1,8 +1,8 @@
 ---
-title: 'Reference: CloudflareDeployer | Deployer'
+title: "Reference: CloudflareDeployer | Deployer"
 description: "The CloudflareDeployer bundles your Mastra server and generates a wrangler.jsonc file conforming to Cloudflare's wrangler configuration."
 packages:
-  - '@mastra/deployer-cloudflare'
+  - "@mastra/deployer-cloudflare"
 ---
 
 # CloudflareDeployer
@@ -38,10 +38,6 @@ export const mastra = new Mastra({
     vars: {
       NODE_ENV: 'production',
     },
-    alias: {
-      ajv: './src/ajv-worker-shim.ts',
-      'ajv/dist/2020.js': './src/ajv-2020-worker-shim.ts',
-    },
     d1_databases: [
       {
         binding: 'DB',
@@ -63,32 +59,6 @@ export const mastra = new Mastra({
 ## Constructor options
 
 The `CloudflareDeployer` constructor accepts the same configuration options as `wrangler.jsonc`. See the [Wrangler configuration documentation](https://developers.cloudflare.com/workers/wrangler/configuration/) for all available options.
-
-### Module aliases
-
-The `alias` option replaces exact module specifiers during dependency analysis, dependency optimization, and final bundling. The same aliases are written to the generated Wrangler configuration.
-
-Use aliases to replace modules that aren't compatible with the Workers runtime. Relative target paths resolve from the Mastra project root during bundling. In the generated `.mastra/output/wrangler.json`, Mastra rewrites them relative to the output directory.
-
-Alias keys match complete specifiers. Configure each required subpath separately:
-
-```typescript title="src/mastra/index.ts"
-import { Mastra } from '@mastra/core'
-import { CloudflareDeployer } from '@mastra/deployer-cloudflare'
-
-export const mastra = new Mastra({
-  deployer: new CloudflareDeployer({
-    name: 'my-worker',
-    alias: {
-      ajv: './src/ajv-worker-shim.ts',
-      'ajv/dist/2020.js': './src/ajv-2020-worker-shim.ts',
-      'ajv-formats': './src/ajv-formats-worker-shim.ts',
-    },
-  }),
-})
-```
-
-Aliases can replace transitive imports, but they can't replace code already bundled inside a published dependency. An alias also doesn't override a module configured as external.
 
 ## Secrets
 

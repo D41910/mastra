@@ -1,7 +1,7 @@
 import { registerApiRoute } from '@mastra/core/server';
-import Ajv from 'ajv';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 
-const validate = new Ajv().compile({
+const validate = new AjvJsonSchemaValidator().getValidator<{ city: string }>({
   type: 'object',
   properties: {
     city: { type: 'string' },
@@ -15,10 +15,11 @@ export const jsonSchemaValidationRoute = registerApiRoute('/json-schema-validati
   handler: async c => {
     const value = await c.req.json();
 
-    if (!validate(value)) {
-      return c.json({ valid: false, issues: validate.errors }, 400);
+    const result = validate(value);
+    if (!result.valid) {
+      return c.json({ valid: false, issues: result.errorMessage }, 400);
     }
 
-    return c.json({ valid: true, value });
+    return c.json({ valid: true, value: result.data });
   },
 });

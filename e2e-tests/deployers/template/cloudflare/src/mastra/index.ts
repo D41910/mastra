@@ -25,11 +25,6 @@ export const mastra = new Mastra({
       NODE_ENV: 'production',
       API_KEY: 'test-api-key',
     },
-    alias: {
-      ajv: './src/ajv-shim.mjs',
-      'ajv/dist/2020.js': './src/ajv-2020-shim.mjs',
-      'ajv-formats': './src/ajv-formats-shim.mjs',
-    },
   }),
   server: {
     apiRoutes: [testRoute, jsonSchemaValidationRoute],

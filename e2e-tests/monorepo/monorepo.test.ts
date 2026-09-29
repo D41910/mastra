@@ -1126,10 +1126,7 @@ export class Ajv {
 export default Ajv;
 `,
             ),
-            writeFile(
-              ajv2020ShimPath,
-              `export { Ajv as default, Ajv, Ajv as Ajv2020 } from './ajv-shim.mjs';\n`,
-            ),
+            writeFile(ajv2020ShimPath, `export { Ajv as default, Ajv, Ajv as Ajv2020 } from './ajv-shim.mjs';\n`),
             writeFile(ajvFormatsShimPath, `export default function addFormats(ajv) { return ajv; }\n`),
           ]);
 
@@ -1143,14 +1140,6 @@ import { aliasValidators } from '@inner/alias-source';
 class AliasDeployer extends Deployer {
   constructor() { super({ name: 'alias-test' }); }
 
-  protected getAliases() {
-    return {
-      ajv: './src/ajv-shim.mjs',
-      'ajv/dist/2020.js': './src/ajv-2020-shim.mjs',
-      'ajv-formats': './src/ajv-formats-shim.mjs',
-    };
-  }
-
   async bundle(entryFile: string, outputDirectory: string, { toolsPaths, projectRoot }: { toolsPaths: (string | string[])[]; projectRoot: string }) {
     await this._bundle(\`
       import { scoreTracesWorkflow } from '@mastra/core/evals/scoreTraces';
@@ -1163,7 +1152,15 @@ class AliasDeployer extends Deployer {
         if (!storage.disableInit) await storage.init();
         mastra.__registerInternalWorkflow(scoreTracesWorkflow);
       }
-    \`, entryFile, { outputDirectory, projectRoot }, toolsPaths);
+    \`, entryFile, {
+      outputDirectory,
+      projectRoot,
+      alias: {
+        ajv: './src/ajv-shim.mjs',
+        'ajv/dist/2020.js': './src/ajv-2020-shim.mjs',
+        'ajv-formats': './src/ajv-formats-shim.mjs',
+      },
+    }, toolsPaths);
   }
 
   async deploy(_outputDirectory: string) {}
@@ -1176,7 +1173,10 @@ class AliasDeployer extends Deployer {
                 'export const mastra = new Mastra({',
                 'export const mastra = new Mastra({\n  deployer: new AliasDeployer(),',
               )
-              .replace("externals: ['bcrypt', 'unicorn-magic']", "externals: ['bcrypt', 'unicorn-magic', '@mastra/deployer']")}`,
+              .replace(
+                "externals: ['bcrypt', '@inner/subpath-only']",
+                "externals: ['bcrypt', '@inner/subpath-only', '@mastra/deployer']",
+              )}`,
           );
 
           const buildResult = await execa(pkgManager, ['build'], {
@@ -1188,7 +1188,9 @@ class AliasDeployer extends Deployer {
 
           const outputDir = join(appDir, '.mastra', 'output');
           const outputFiles = (await readdir(outputDir)).filter(file => file.endsWith('.mjs'));
-          const output = (await Promise.all(outputFiles.map(file => readFile(join(outputDir, file), 'utf-8')))).join('\n');
+          const output = (await Promise.all(outputFiles.map(file => readFile(join(outputDir, file), 'utf-8')))).join(
+            '\n',
+          );
           expect(output).toContain('MASTRA_AJV_SHIM');
 
           const outputPackageJson = JSON.parse(await readFile(join(outputDir, 'package.json'), 'utf-8'));

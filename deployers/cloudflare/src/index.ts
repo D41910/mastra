@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
-import { join, relative, resolve } from 'node:path';
+import { join, relative } from 'node:path';
 import { Deployer } from '@mastra/deployer';
 import type { analyzeBundle } from '@mastra/deployer/analyze';
 import type { BundlerOptions } from '@mastra/deployer/bundler';
@@ -11,6 +11,8 @@ import { mastraInstanceWrapper } from './plugins/mastra-instance-wrapper';
 import { postgresStoreInstanceChecker } from './plugins/postgres-store-instance-checker';
 
 const nodeBuiltins = new Set(builtinModules);
+const mcpAjvValidatorSpecifier = '@modelcontextprotocol/client/validators/ajv';
+const mcpValidatorStubPath = 'mcp-json-schema-validator-stub.mjs';
 
 /**
  * Rollup plugin that marks bare Node.js builtin imports (e.g. `process`, `path`)
@@ -87,14 +89,9 @@ export class CloudflareDeployer extends Deployer {
     }
   }
 
-  protected getAliases(): Record<string, string> {
-    return { ...(this.userConfig.alias ?? {}) };
-  }
-
   async writeFiles(outputDirectory: string): Promise<void> {
     const {
       vars: userVars,
-      alias: userAlias,
       // Remove deprecated fields so they don't leak into wrangler.json
       projectName: _projectName,
       workerNamespace: _workerNamespace,
@@ -170,6 +167,12 @@ export default stream;
 `;
     await writeFile(join(outputDirectory, this.outputDir, readableStreamStubPath), readableStreamStub);
 
+    // The MCP client's AJV validator compiles schemas with new Function(), which
+    // Cloudflare Workers disallow. Re-export the upstream Workers validator under
+    // the AJV validator's export name instead.
+    const mcpValidatorStub = `export { CfWorkerJsonSchemaValidator as AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';\n`;
+    await writeFile(join(outputDirectory, this.outputDir, mcpValidatorStubPath), mcpValidatorStub);
+
     // Write module stub — Wrangler runs Workers with an undefined import.meta.url,
     // so eager createRequire(import.meta.url) interop helpers must not call Node's implementation.
     const moduleStubPath = 'module-stub.mjs';
@@ -187,12 +190,6 @@ export default { createRequire };
 
     const projectRoot = join(outputDirectory, '../');
     const outputPath = join(outputDirectory, this.outputDir);
-    const outputUserAlias = Object.fromEntries(
-      Object.entries(userAlias ?? {}).map(([specifier, target]) => [
-        specifier,
-        target.startsWith('.') ? `./${relative(outputPath, resolve(projectRoot, target))}` : target,
-      ]),
-    );
     const wranglerConfig: Unstable_RawConfig = {
       name: 'mastra',
       compatibility_date: '2025-04-01',
@@ -212,7 +209,7 @@ export default { createRequire };
         'readable-stream': `./${readableStreamStubPath}`,
         module: `./${moduleStubPath}`,
         'node:module': `./${moduleStubPath}`,
-        ...outputUserAlias,
+        [mcpAjvValidatorSpecifier]: `./${mcpValidatorStubPath}`,
       },
     };
 
@@ -233,7 +230,7 @@ export default { createRequire };
         'readable-stream': `./${relative(projectRoot, join(outputPath, readableStreamStubPath))}`,
         module: `./${relative(projectRoot, join(outputPath, moduleStubPath))}`,
         'node:module': `./${relative(projectRoot, join(outputPath, moduleStubPath))}`,
-        ...userAlias,
+        [mcpAjvValidatorSpecifier]: `./${relative(projectRoot, join(outputPath, mcpValidatorStubPath))}`,
       },
     };
 
@@ -327,7 +324,19 @@ try {
     outputDirectory: string,
     { toolsPaths, projectRoot }: { toolsPaths: (string | string[])[]; projectRoot: string },
   ): Promise<void> {
-    return this._bundle(this.getEntry(), entryFile, { outputDirectory, projectRoot, enableEsmShim: false }, toolsPaths);
+    return this._bundle(
+      this.getEntry(),
+      entryFile,
+      {
+        outputDirectory,
+        projectRoot,
+        enableEsmShim: false,
+        alias: {
+          [mcpAjvValidatorSpecifier]: join(outputDirectory, this.outputDir, mcpValidatorStubPath),
+        },
+      },
+      toolsPaths,
+    );
   }
 
   async deploy(): Promise<void> {
