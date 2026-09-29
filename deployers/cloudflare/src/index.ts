@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { Deployer } from '@mastra/deployer';
 import type { analyzeBundle } from '@mastra/deployer/analyze';
 import type { BundlerOptions } from '@mastra/deployer/bundler';
@@ -85,6 +85,10 @@ export class CloudflareDeployer extends Deployer {
       this.userConfig.kv_namespaces = userConfig.kvNamespaces;
       console.warn('[CloudflareDeployer]: `kvNamespaces` is deprecated, use `kv_namespaces` instead');
     }
+  }
+
+  protected getAliases(): Record<string, string> {
+    return { ...(this.userConfig.alias ?? {}) };
   }
 
   async writeFiles(outputDirectory: string): Promise<void> {
@@ -181,6 +185,14 @@ export default { createRequire };
 `;
     await writeFile(join(outputDirectory, this.outputDir, moduleStubPath), moduleStub);
 
+    const projectRoot = join(outputDirectory, '../');
+    const outputPath = join(outputDirectory, this.outputDir);
+    const outputUserAlias = Object.fromEntries(
+      Object.entries(userAlias ?? {}).map(([specifier, target]) => [
+        specifier,
+        target.startsWith('.') ? `./${relative(outputPath, resolve(projectRoot, target))}` : target,
+      ]),
+    );
     const wranglerConfig: Unstable_RawConfig = {
       name: 'mastra',
       compatibility_date: '2025-04-01',
@@ -200,18 +212,15 @@ export default { createRequire };
         'readable-stream': `./${readableStreamStubPath}`,
         module: `./${moduleStubPath}`,
         'node:module': `./${moduleStubPath}`,
-        ...userAlias,
+        ...outputUserAlias,
       },
     };
 
     // TODO: Remove writing this file in the next major version, it should only be written to the root of the project
-    await writeFile(join(outputDirectory, this.outputDir, 'wrangler.json'), JSON.stringify(wranglerConfig, null, 2));
+    await writeFile(join(outputPath, 'wrangler.json'), JSON.stringify(wranglerConfig, null, 2));
 
-    const projectRoot = join(outputDirectory, '../');
     const jsoncFilePath = join(projectRoot, 'wrangler.jsonc');
-    const mainFilePath = join(outputDirectory, this.outputDir, 'index.mjs');
-    const tsStubFilePath = join(outputDirectory, this.outputDir, typescriptStubPath);
-    const moduleStubFilePath = join(outputDirectory, this.outputDir, moduleStubPath);
+    const mainFilePath = join(outputPath, 'index.mjs');
 
     const wranglerJsoncConfig: Unstable_RawConfig & { placeholder: string } = {
       placeholder: 'PLACEHOLDER',
@@ -219,10 +228,12 @@ export default { createRequire };
       ...wranglerConfig,
       main: `./${relative(projectRoot, mainFilePath)}`,
       alias: {
-        ...wranglerConfig.alias,
-        typescript: `./${relative(projectRoot, tsStubFilePath)}`,
-        module: `./${relative(projectRoot, moduleStubFilePath)}`,
-        'node:module': `./${relative(projectRoot, moduleStubFilePath)}`,
+        typescript: `./${relative(projectRoot, join(outputPath, typescriptStubPath))}`,
+        execa: `./${relative(projectRoot, join(outputPath, execaStubPath))}`,
+        'readable-stream': `./${relative(projectRoot, join(outputPath, readableStreamStubPath))}`,
+        module: `./${relative(projectRoot, join(outputPath, moduleStubPath))}`,
+        'node:module': `./${relative(projectRoot, join(outputPath, moduleStubPath))}`,
+        ...userAlias,
       },
     };
 

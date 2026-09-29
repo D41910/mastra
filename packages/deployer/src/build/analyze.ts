@@ -394,7 +394,7 @@ export async function analyzeBundle(
     isDev?: boolean;
     bundlerOptions?: Pick<
       BundlerOptions,
-      'externals' | 'externalsPreset' | 'enableSourcemap' | 'dynamicPackages'
+      'externals' | 'externalsPreset' | 'enableSourcemap' | 'dynamicPackages' | 'alias'
     > | null;
     env?: Record<string, string>;
   },
@@ -450,6 +450,7 @@ export async function analyzeBundle(
       activeEntries: activeAnalyzeEntries,
       externals: mergedExternals,
       externalsPreset,
+      alias: bundlerOptions?.alias,
     });
 
     // Detect pino transports in the bundled output
@@ -526,6 +527,7 @@ export async function analyzeBundle(
       externalsPreset,
       mergedExternals,
       isDev,
+      alias: bundlerOptions?.alias,
     },
     projectRoot,
     workspaceRoot,

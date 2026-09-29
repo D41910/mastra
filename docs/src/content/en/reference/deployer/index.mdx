@@ -1,8 +1,8 @@
 ---
-title: "Reference: Deployer | Deployer"
-description: "The Deployer handles the deployment of standalone Mastra applications by packaging code and managing environment files while serving applications through the Hono framework."
+title: 'Reference: Deployer | Deployer'
+description: 'The Deployer handles the deployment of standalone Mastra applications by packaging code and managing environment files while serving applications through the Hono framework.'
 packages:
-  - "@mastra/deployer"
+  - '@mastra/deployer'
 ---
 
 # Deployer
@@ -19,6 +19,12 @@ import { Deployer } from '@mastra/deployer'
 class CustomDeployer extends Deployer {
   constructor() {
     super({ name: 'custom-deployer' })
+  }
+
+  protected getAliases(): Record<string, string> {
+    return {
+      ajv: './src/ajv-worker-shim.ts',
+    }
   }
 
   async deploy(outputDirectory: string): Promise<void> {
@@ -103,12 +109,35 @@ The Deployer class inherits the following key methods from the Bundler class:
     description: 'Generates a package.json file in the output directory with the specified dependencies.',
   },
   {
+    name: 'getAliases',
+    type: '() => Record<string, string>',
+    description:
+      'Returns exact module specifier aliases that apply during dependency analysis, dependency optimization, and final bundling.',
+  },
+  {
     name: '_bundle',
     type: '(serverFile: string, mastraEntryFile: string, outputDirectory: string, bundleLocation?: string) => Promise<void>',
     description: 'Bundles the application using the specified server and Mastra entry files.',
   },
 ]}
 />
+
+## Module aliases
+
+Override `getAliases()` in a custom deployer to replace modules for the target runtime. Alias keys match complete import specifiers. Add separate entries for subpath imports such as `ajv/dist/2020.js`.
+
+Relative targets resolve from the project root. Package targets use normal module resolution. The aliases apply during every bundling pass, including dependencies imported by other packages, but they can't replace code that a published package has already bundled into its own files.
+
+```typescript oxfmt:false
+protected getAliases(): Record<string, string> {
+  return {
+    ajv: './src/ajv-worker-shim.ts',
+    'ajv/dist/2020.js': './src/ajv-2020-worker-shim.ts',
+  };
+}
+```
+
+An alias doesn't override a module configured as external because external imports aren't bundled.
 
 ## Core concepts
 

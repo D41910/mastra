@@ -43,6 +43,77 @@ describe('CloudflareDeployer', () => {
     });
   });
 
+  describe('module aliases', () => {
+    it('exposes user aliases to the Mastra bundler', () => {
+      deployer = new CloudflareDeployer({
+        name: 'test-worker',
+        alias: { ajv: './src/ajv-shim.mjs' },
+      });
+
+      // @ts-expect-error - accessing protected method for testing
+      expect(deployer.getAliases()).toEqual({ ajv: './src/ajv-shim.mjs' });
+    });
+
+    it('includes the module alias plugin in final bundle options', async () => {
+      deployer = new CloudflareDeployer({
+        name: 'test-worker',
+        alias: { ajv: './src/ajv-shim.mjs' },
+      });
+
+      // @ts-expect-error - accessing protected method for testing
+      const inputOptions = await deployer.getBundlerOptions(
+        join(tempDir, 'server.ts'),
+        join(tempDir, 'src', 'mastra', 'index.ts'),
+        {
+          dependencies: new Map(),
+          externalDependencies: new Map(),
+          depsToOptimize: new Map(),
+          workspaceMap: new Map(),
+          workspaceRoot: undefined,
+          outputDir: join(tempDir, 'output'),
+        },
+        [],
+        {
+          enableSourcemap: false,
+          enableMinify: false,
+          enableEsmShim: true,
+          externals: [],
+          alias: { ajv: join(tempDir, 'src', 'ajv-shim.mjs') },
+        },
+        {},
+        tempDir,
+      );
+      const plugins = Array.isArray(inputOptions.plugins) ? (inputOptions.plugins as { name?: string }[]) : [];
+
+      expect(plugins.map(plugin => plugin.name)).toContain('module-alias');
+    });
+
+    it('resolves relative user aliases correctly for both Wrangler config locations', async () => {
+      const outputDirectory = join(tempDir, '.mastra');
+      await mkdir(join(outputDirectory, 'output'), { recursive: true });
+      deployer = new CloudflareDeployer({
+        name: 'test-worker',
+        alias: {
+          ajv: './src/ajv-shim.mjs',
+          replacement: 'replacement-package',
+        },
+      });
+      vi.spyOn(deployer, 'loadEnvVars').mockResolvedValue(new Map());
+
+      await deployer.writeFiles(outputDirectory);
+
+      const outputConfig = JSON.parse(await readFile(join(outputDirectory, 'output', 'wrangler.json'), 'utf-8'));
+      const rootConfig = JSON.parse(
+        (await readFile(join(tempDir, 'wrangler.jsonc'), 'utf-8')).replace(/\/\*[\s\S]*?\*\//, ''),
+      );
+
+      expect(outputConfig.alias.ajv).toBe('./../../src/ajv-shim.mjs');
+      expect(outputConfig.alias.replacement).toBe('replacement-package');
+      expect(rootConfig.alias.ajv).toBe('./src/ajv-shim.mjs');
+      expect(rootConfig.alias.replacement).toBe('replacement-package');
+    });
+  });
+
   describe('writeFiles', () => {
     describe('environment variable handling', () => {
       it('should exclude .env variables from wrangler config vars', async () => {
@@ -124,8 +195,8 @@ describe('CloudflareDeployer', () => {
         const wranglerConfig = JSON.parse(await readFile(wranglerConfigPath, 'utf-8'));
 
         // User's alias should override the default, other aliases preserved
-        expect(wranglerConfig.alias.typescript).toBe('./custom-typescript-stub.js');
-        expect(wranglerConfig.alias['other-module']).toBe('./other.js');
+        expect(wranglerConfig.alias.typescript).toBe('./../../custom-typescript-stub.js');
+        expect(wranglerConfig.alias['other-module']).toBe('./../../other.js');
       });
     });
 
@@ -188,7 +259,7 @@ describe('CloudflareDeployer', () => {
         const wranglerConfigPath = join(tempDir, 'output', 'wrangler.json');
         const wranglerConfig = JSON.parse(await readFile(wranglerConfigPath, 'utf-8'));
 
-        expect(wranglerConfig.alias['readable-stream']).toBe('./custom-stream.js');
+        expect(wranglerConfig.alias['readable-stream']).toBe('./../../custom-stream.js');
       });
     });
   });

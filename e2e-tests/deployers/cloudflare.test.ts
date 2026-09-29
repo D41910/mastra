@@ -17,8 +17,7 @@ describe.for([['pnpm'] as const])(`%s cloudflare deployer`, ([pkgManager]) => {
       const registry = inject('registry');
 
       fixturePath = await mkdtemp(join(tmpdir(), `mastra-cloudflare-deployer-test-${pkgManager}-`));
-      process.env.pnpm_config_registry = registry;
-      await setupDeployerProject(fixturePath, tag, pkgManager, 'cloudflare');
+      await setupDeployerProject(fixturePath, tag, pkgManager, 'cloudflare', registry);
     },
     10 * 60 * 1000,
   );
@@ -43,6 +42,18 @@ describe.for([['pnpm'] as const])(`%s cloudflare deployer`, ([pkgManager]) => {
       const body = await res.json();
       expect(res.status).toBe(200);
       expect(Object.keys(body)).toEqual(['weatherTool']);
+    });
+
+    it('should validate JSON Schema input without dynamic code generation', async () => {
+      const res = await fetch(`http://localhost:${port}/json-schema-validation`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ city: 'Utrecht' }),
+      });
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body).toEqual({ valid: true, value: { city: 'Utrecht' } });
     });
   }
 

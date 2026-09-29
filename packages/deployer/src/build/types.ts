@@ -36,6 +36,11 @@ export interface BundlerOptions {
   externals: boolean | string[];
   /** Preserve the default external-all behavior alongside explicitly listed packages. */
   externalsPreset?: boolean;
+  /**
+   * Exact module specifier aliases. Path targets are normalized to absolute paths
+   * before reaching the build pipeline; bare module targets are kept as-is.
+   */
+  alias?: Record<string, string>;
   dynamicPackages?: string[];
 }
 

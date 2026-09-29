@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, posix, relative } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { MastraBundler } from '@mastra/core/bundler';
 import { MastraError, ErrorDomain, ErrorCategory } from '@mastra/core/error';
 import type { Config } from '@mastra/core/mastra';
@@ -395,6 +395,15 @@ export abstract class Bundler extends MastraBundler {
     return {};
   }
 
+  /**
+   * Returns exact module specifier aliases for the build pipeline. Relative path
+   * targets are resolved from the project root; bare module targets are resolved
+   * from the Mastra entry file rather than from the importing dependency.
+   */
+  protected getAliases(): Record<string, string> {
+    return {};
+  }
+
   protected async installDependencies(
     outputDirectory: string,
     rootDir = process.cwd(),
@@ -471,7 +480,7 @@ export abstract class Bundler extends MastraBundler {
     mastraEntryFile: string,
     analyzedBundleInfo: Awaited<ReturnType<typeof analyzeBundle>>,
     toolsPaths: (string | string[])[],
-    { enableSourcemap, enableMinify, enableEsmShim, externals, externalsPreset }: BundlerOptions,
+    { enableSourcemap, enableMinify, enableEsmShim, externals, externalsPreset, alias }: BundlerOptions,
     additionalEntries: Record<string, string>,
     projectRoot: string,
   ) {
@@ -492,6 +501,7 @@ export abstract class Bundler extends MastraBundler {
         enableEsmShim,
         externalsPreset: externals === true || !!externalsPreset,
         explicitExternals: Array.isArray(externals) ? externals : [],
+        alias,
       },
     );
     const toolsInputOptions = await this.listToolsInputOptions(toolsPaths, projectRoot);
@@ -606,12 +616,19 @@ export abstract class Bundler extends MastraBundler {
     const entryProjectRoot = closestPkgJson ? dirname(closestPkgJson) : projectRoot;
 
     const bundlerOptions = await this.getUserBundlerOptions(mastraEntryFile, outputDirectory);
+    const alias = Object.fromEntries(
+      Object.entries(this.getAliases()).map(([specifier, target]) => [
+        specifier,
+        target.startsWith('.') ? resolve(projectRoot, target) : target,
+      ]),
+    );
     const internalBundlerOptions: BundlerOptions = {
       enableSourcemap: !!bundlerOptions.sourcemap,
       enableMinify: !!bundlerOptions.minify,
       externals: bundlerOptions.externals ?? [],
       externalsPreset: this.defaultExternalsPreset && bundlerOptions.externals !== false,
       enableEsmShim,
+      alias,
       dynamicPackages: bundlerOptions.dynamicPackages,
     };
 
