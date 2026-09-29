@@ -26,6 +26,12 @@ describe('who said it', () => {
       }
     },
   );
+
+  it.each(['thread', 'resource'] as const)('explains quoted user messages in search results in %s scope', scope => {
+    expect(getRetrievalInstructions(scope)).toContain('User said (<date> <time>): "…"');
+    expect(getRetrievalInstructions(scope)).toContain("They are the user's actual words");
+    expect(getRetrievalInstructions(scope, undefined, false)).not.toContain('User said (');
+  });
 });
 
 describe('actor recall guidance', () => {

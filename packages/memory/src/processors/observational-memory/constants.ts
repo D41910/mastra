@@ -163,6 +163,8 @@ The recall tool is limited to the current conversation thread.
     ? `### Finding evidence
 Search matches are entry points, not a complete timeline. Similarity selects the matches; they are displayed by observation date. A missing search hit is not evidence that an event did not happen.
 
+Search excerpts can include \`User said (<date> <time>): "…"\` lines, placed in time order among the observations. These quote the user's own messages from that group, shortened around the words that match your query. They are the user's actual words, while observations are summaries.
+
 ${pagingEnabled ? 'Observations and messages are two views of the same conversation history, not separate archives. Use search to find an entry point, observations for breadth, and messages for depth:' : 'Use search to find an entry point and messages for depth:'}
 ${lookupSteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
 

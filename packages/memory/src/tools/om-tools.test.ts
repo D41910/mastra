@@ -2485,6 +2485,7 @@ describe('om-tools', () => {
       });
 
       const memory = {
+        getMemoryStore: async () => ({ listMessagesById: async () => ({ messages: [] }) }),
         listThreads: async () => ({ threads, total: threads.length, hasMore: false, page: 0 }),
         searchMessages,
         getThreadById: async ({ threadId }: { threadId: string }) => threads.find(t => t.id === threadId) || null,

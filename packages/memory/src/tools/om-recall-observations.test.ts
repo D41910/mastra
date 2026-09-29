@@ -366,3 +366,131 @@ describe('recall observations integration', () => {
     expect(om.getHistory).toHaveBeenNthCalledWith(1, 'thread', 'resource', 1, { recordId: 'record', groupId: 'b' });
   });
 });
+
+describe('user messages in search results', () => {
+  const message = (id: string, role: 'user' | 'assistant', at: string, text: string) =>
+    ({
+      id,
+      role,
+      threadId: 'thread',
+      resourceId: 'resource',
+      createdAt: new Date(at),
+      content: { format: 2, parts: [{ type: 'text', text }] },
+    }) as any;
+  const oilGroup =
+    'Date: Aug 1, 2022 * 🔴 (14:10) User asked about tire pressure. * -> Assistant listed PSI ranges. ' +
+    '* 🔴 (14:17) User asked how to inspect oil levels. * -> Assistant gave 8 steps. ' +
+    '* 🔴 (14:30) User asked about wipers.';
+  function quoteSetup(messages: any[], text = oilGroup, timeZone = 'UTC') {
+    const { memory, om } = setup();
+    const listMessagesById = vi.fn(async ({ messageIds }: { messageIds: string[] }) => ({
+      messages: messages.filter(m => messageIds.includes(m.id)),
+    }));
+    memory.getMemoryStore = async () => ({ listMessagesById });
+    memory.recall = vi.fn(async ({ threadId, filter }: any) => {
+      const inRange = messages.filter(
+        m => m.threadId === threadId && m.createdAt >= filter.dateRange.start && m.createdAt <= filter.dateRange.end,
+      );
+      return { messages: inRange, total: inRange.length, page: 0, perPage: false, hasMore: false };
+    }) as never;
+    memory.searchMessages = async () => ({
+      results: [
+        {
+          threadId: 'thread',
+          groupId: 'g',
+          range: `${messages[0].id}:${messages.at(-1).id}`,
+          score: 1,
+          observedAt: new Date('2022-08-01T14:31:00Z'),
+          text,
+        },
+      ],
+    });
+    (om.getHistory as any).mockImplementation(async () => [
+      { id: 'current', threadId: 'current', generationCount: 0, observedTimezone: timeZone, activeObservations: '' },
+    ]);
+    return { memory, om };
+  }
+  const search = (memory: RecallMemory, om: OMTimelineEngine, query: string) =>
+    searchMessagesForResource({ memory, om, resourceId: 'resource', currentThreadId: 'current', query });
+
+  it('places the matching user message among the observations in time order', async () => {
+    const messages = [
+      message('m1', 'user', '2022-08-01T14:10:00Z', 'What tire pressure should I run?'),
+      message('m2', 'assistant', '2022-08-01T14:10:10Z', 'Oil levels matter too, but for tires use 35 PSI.'),
+      message(
+        'm3',
+        'user',
+        '2022-08-01T14:17:25Z',
+        "Can you help me understand how to inspect oil levels for long drives, I've learned a bit from YouTube",
+      ),
+      message('m4', 'assistant', '2022-08-01T14:17:35Z', 'Here are 8 steps.'),
+      message('m5', 'user', '2022-08-01T14:30:00Z', 'Any tips on wipers?'),
+    ];
+    const { memory, om } = quoteSetup(messages);
+    const { results } = await search(memory, om, 'oil levels YouTube');
+    const quote = `* User said (Aug 1, 2022 14:17): "Can you help me understand how to inspect oil levels for long drives, I've learned a bit from YouTube"`;
+    expect(results).toContain(quote);
+    expect(results.indexOf('Assistant gave 8 steps.')).toBeLessThan(results.indexOf(quote));
+    expect(results.indexOf(quote)).toBeLessThan(results.indexOf('(14:30) User asked about wipers'));
+    expect(results).not.toContain('What tire pressure');
+    expect(results).not.toContain('Oil levels matter too');
+    expect(memory.recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thread',
+        filter: { dateRange: { start: messages[0].createdAt, end: messages[4].createdAt } },
+      }),
+    );
+  });
+
+  it('shows at most two user messages, preferring the ones matching more of the query', async () => {
+    const messages = [
+      message('m1', 'user', '2022-08-01T14:10:00Z', 'Tell me about oil'),
+      message('m2', 'user', '2022-08-01T14:17:00Z', 'How do I check oil levels?'),
+      message('m3', 'user', '2022-08-01T14:30:00Z', 'Is checking oil levels on long drives needed?'),
+    ];
+    const { memory, om } = quoteSetup(messages);
+    const { results } = await search(memory, om, 'oil levels drives');
+    expect(results).not.toContain('Tell me about oil');
+    expect(results.indexOf('How do I check oil levels?')).toBeGreaterThan(-1);
+    expect(results.indexOf('How do I check oil levels?')).toBeLessThan(
+      results.indexOf('Is checking oil levels on long drives needed?'),
+    );
+  });
+
+  it('shortens long user messages around the words that match the query', async () => {
+    const long = `${'filler '.repeat(200)}the seaplane fare is $650 per person${' filler'.repeat(200)}`;
+    const messages = [message('m1', 'user', '2022-08-01T14:17:00Z', long)];
+    const { memory, om } = quoteSetup(messages);
+    const { results } = await search(memory, om, 'seaplane fare');
+    const quote = /\* User said \([^)]*\): "(…[^"]*…)"/.exec(results)?.[1];
+    expect(quote).toContain('the seaplane fare is $650 per person');
+    expect(quote!.length).toBeLessThanOrEqual(402);
+  });
+
+  it('writes quote times in the timezone the observations use', async () => {
+    const messages = [message('m1', 'user', '2022-08-01T21:17:00Z', 'How do I check oil levels?')];
+    const text = 'Date: Aug 1, 2022 * 🔴 (14:10) User asked about tires. * 🔴 (14:30) User asked about wipers.';
+    const { memory, om } = quoteSetup(messages, text, 'America/Los_Angeles');
+    const { results } = await search(memory, om, 'oil levels');
+    const quote = '* User said (Aug 1, 2022 14:17): "How do I check oil levels?"';
+    expect(results.indexOf('(14:10) User asked about tires.')).toBeLessThan(results.indexOf(quote));
+    expect(results.indexOf(quote)).toBeLessThan(results.indexOf('(14:30) User asked about wipers.'));
+  });
+
+  it('does not read source messages for groups already in context', async () => {
+    const messages = [message('m1', 'user', '2022-08-01T14:17:00Z', 'How do I check oil levels?')];
+    const { memory, om } = quoteSetup(messages);
+    (om.getHistory as any).mockImplementation(async () => [
+      {
+        id: 'current',
+        threadId: 'current',
+        generationCount: 0,
+        observedTimezone: 'UTC',
+        activeObservations: wrapInObservationGroup('Date: Aug 1, 2022\nOil', 'm1:m1', 'g'),
+      },
+    ]);
+    const { results } = await search(memory, om, 'oil levels');
+    expect(results).toContain('Group already in current context.');
+    expect(memory.recall).not.toHaveBeenCalled();
+  });
+});

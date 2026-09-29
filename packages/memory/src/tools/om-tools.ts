@@ -410,25 +410,6 @@ export async function searchMessagesForResource({
   const [currentRecord] = om && currentThreadId ? await om.getHistory(currentThreadId, resourceId, 1) : [];
   const timeZone = resolveTimeZone(currentRecord?.observedTimezone ?? undefined);
 
-  // Reserve an excerpt for every hit before distributing spare space in similarity order.
-  // Metadata and navigation do not consume the observation-text allowance.
-  const prepareEntry = (match: RecallSearchResult, index: number, budget: number) => {
-    const rawBody = (match.text || '').trim() || '_Observation text unavailable._';
-    const body = match.groupId ? addRelativeTimeToObservations(rawBody, now, timeZone) : rawBody;
-    const entry = { match, index, body, excerpt: '', excerptContent: '', suppression: '' };
-    setExcerpt(entry, budget);
-    return entry;
-  };
-  const ordered = limitedMatches.map((match, index) => prepareEntry(match, index, perGroupBudget));
-  let remaining = contentBudget - ordered.reduce((sum, entry) => sum + estimateTokenCount(entry.excerpt), 0);
-  for (const entry of ordered) {
-    if (remaining <= 0) break;
-    if (entry.excerpt === entry.body) continue;
-    const previousTokens = estimateTokenCount(entry.excerpt);
-    setExcerpt(entry, previousTokens + remaining);
-    remaining -= estimateTokenCount(entry.excerpt) - previousTokens;
-  }
-
   const visibleExcerpts = getVisibleSearchExcerpts(currentMessages);
   // Groups in the current record are already in context: active ones as observations,
   // unactivated buffered ones as their raw messages. Reflected-away groups are not.
@@ -438,6 +419,73 @@ export async function searchMessagesForResource({
     ...getBufferedChunks(currentRecord).map(chunk => chunk.observations),
   ]) {
     for (const group of parseObservationGroups(observations)) contextGroupIds.add(group.id);
+  }
+
+  // Observations paraphrase. Quote the user's own words from the group's source messages,
+  // choosing the messages that share the most words with the query.
+  const loadUserQuotes = async (match: RecallSearchResult) => {
+    if (!match.groupId || !match.range || terms.length === 0) return [];
+    if (contextGroupIds.has(match.groupId) || sourceRangeOverlapsContext({ match, messages: currentMessages })) {
+      return [];
+    }
+    const [startId, endId] = match.range.split(':');
+    if (!startId || !endId) return [];
+    const store = await memory.getMemoryStore();
+    const { messages: endpoints } = await store.listMessagesById({ messageIds: [startId, endId] });
+    const endpoint = (id: string) =>
+      endpoints.find(message => message.id === id && message.threadId === match.threadId);
+    const start = endpoint(startId);
+    const end = endpoint(endId);
+    if (!start || !end) return [];
+    const { messages } = await memory.recall({
+      threadId: match.threadId,
+      resourceId,
+      page: 0,
+      perPage: false,
+      orderBy: { field: 'createdAt', direction: 'ASC' },
+      filter: { dateRange: { start: new Date(start.createdAt), end: new Date(end.createdAt) } },
+    });
+    return messages
+      .filter(message => message.role === 'user')
+      .map(message => {
+        const text = userMessageText(message);
+        const lower = text.toLowerCase();
+        return { message, text, score: terms.filter(term => lower.includes(term)).length };
+      })
+      .filter(candidate => candidate.score > 0)
+      .sort(
+        (a, b) =>
+          b.score - a.score || new Date(a.message.createdAt).getTime() - new Date(b.message.createdAt).getTime(),
+      )
+      .slice(0, USER_QUOTES_PER_GROUP)
+      .map(({ message, text }) => {
+        const clock = observationClock(new Date(message.createdAt), timeZone);
+        return {
+          key: clock.key,
+          line: `* User said (${clock.label}): ${JSON.stringify(quoteAroundTerms(text, terms))}`,
+        };
+      });
+  };
+
+  // Reserve an excerpt for every hit before distributing spare space in similarity order.
+  // Metadata and navigation do not consume the observation-text allowance.
+  const prepareEntry = async (match: RecallSearchResult, index: number, budget: number) => {
+    const rawBody = (match.text || '').trim() || '_Observation text unavailable._';
+    const dated = match.groupId ? addRelativeTimeToObservations(rawBody, now, timeZone) : rawBody;
+    const quotes = await loadUserQuotes(match);
+    const body = quotes.length ? interleaveUserQuotes(dated, quotes) : dated;
+    const entry = { match, index, body, excerpt: '', excerptContent: '', suppression: '' };
+    setExcerpt(entry, budget);
+    return entry;
+  };
+  const ordered = await Promise.all(limitedMatches.map((match, index) => prepareEntry(match, index, perGroupBudget)));
+  let remaining = contentBudget - ordered.reduce((sum, entry) => sum + estimateTokenCount(entry.excerpt), 0);
+  for (const entry of ordered) {
+    if (remaining <= 0) break;
+    if (entry.excerpt === entry.body) continue;
+    const previousTokens = estimateTokenCount(entry.excerpt);
+    setExcerpt(entry, previousTokens + remaining);
+    remaining -= estimateTokenCount(entry.excerpt) - previousTokens;
   }
   const suppressCoveredEntry = (entry: (typeof ordered)[number]) => {
     if (!entry.match.groupId) return;
@@ -486,7 +534,7 @@ export async function searchMessagesForResource({
           const thread = await memory.getThreadById({ threadId: match.threadId });
           if (thread) threadMap.set(match.threadId, thread);
         }
-        const entry = prepareEntry(match, ordered.length, backfillBudget);
+        const entry = await prepareEntry(match, ordered.length, backfillBudget);
         suppressCoveredEntry(entry);
         ordered.push(entry);
         if (!entry.suppression) freshCount++;
@@ -717,6 +765,80 @@ function selectSearchExcerpt(body: string, terms: string[], maxTokens: number): 
   const window = chunkTextByTokens(body, maxTokens - estimateTokenCount(prefix), best.start);
   if (!window.text) return { text: head.text, content: head.text };
   return { text: prefix + window.text, content: window.text };
+}
+
+const USER_QUOTES_PER_GROUP = 2;
+const USER_QUOTE_CHARS = 400;
+
+function userMessageText(message: MastraDBMessage): string {
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : getMessageParts(message)
+          .map((part: { type?: string; text?: string }) => (part.type === 'text' ? (part.text ?? '') : ''))
+          .join(' ');
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** Cut a long message to a window starting shortly before the first query word it contains. */
+function quoteAroundTerms(text: string, terms: string[]): string {
+  if (text.length <= USER_QUOTE_CHARS) return text;
+  const lower = text.toLowerCase();
+  const hits = terms.map(term => lower.indexOf(term)).filter(index => index >= 0);
+  let start = hits.length ? Math.max(0, Math.min(Math.min(...hits) - 100, text.length - USER_QUOTE_CHARS)) : 0;
+  const startCode = text.charCodeAt(start);
+  if (startCode >= 0xdc00 && startCode <= 0xdfff) start += 1;
+  const window = safeSlice(text.slice(start), USER_QUOTE_CHARS);
+  return `${start > 0 ? '…' : ''}${window}${start + window.length < text.length ? '…' : ''}`;
+}
+
+/** Calendar day and minute in `timeZone`, as a sortable key and as displayed in observations. */
+function observationClock(date: Date, timeZone: string | undefined): { key: string; label: string } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(p => p.type === type)?.value ?? '';
+  const time = `${part('hour')}:${part('minute')}`;
+  const day = new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric', year: 'numeric' }).format(
+    date,
+  );
+  return { key: `${part('year')}-${part('month')}-${part('day')} ${time}`, label: `${day} ${time}` };
+}
+
+/**
+ * Insert quoted user messages into observation text at their place in time: before the first
+ * observation line written after them. Observation lines carry "(HH:MM)" under a "Date:" header.
+ */
+function interleaveUserQuotes(body: string, quotes: { key: string; line: string }[]): string {
+  const starts = [0, ...[...body.matchAll(/(?<=\s)(?:Date: |\* )/g)].map(match => match.index)];
+  const timed: { index: number; key: string }[] = [];
+  let day: string | undefined;
+  for (const start of starts) {
+    const head = body.slice(start, start + 48);
+    const header = /^Date: ([A-Z][a-z]{2} \d{1,2}, \d{4})/.exec(head);
+    if (header) {
+      const parsed = new Date(`${header[1]} UTC`);
+      day = Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().slice(0, 10);
+      continue;
+    }
+    const time = /^\*\s+(?:\S+\s+)?\((\d{1,2}):(\d{2})(?:-\d{1,2}:\d{2})?\)/.exec(head);
+    if (day && time) timed.push({ index: start, key: `${day} ${time[1]!.padStart(2, '0')}:${time[2]}` });
+  }
+  let result = body;
+  for (const quote of [...quotes].sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))) {
+    const index = timed.find(line => line.key > quote.key)?.index;
+    result =
+      index === undefined
+        ? `${result}\n${quote.line}`
+        : `${result.slice(0, index)}${quote.line}\n${result.slice(index)}`;
+  }
+  return result;
 }
 
 function lowDetailPartLimit(type: string): number {
