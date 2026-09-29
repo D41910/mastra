@@ -1,5 +1,10 @@
 import { ErrorCategory, ErrorDomain, MastraError } from '@mastra/core/error';
-import type { Plugin } from 'rollup';
+import rollupAlias from '@rollup/plugin-alias';
+import type { Plugin, ResolveIdHook } from 'rollup';
+
+function exactMatch(specifier: string) {
+  return new RegExp(`^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+}
 
 export function moduleAlias(alias: Record<string, string>, resolveFrom: string): Plugin | null {
   const entries = Object.entries(alias);
@@ -7,20 +12,12 @@ export function moduleAlias(alias: Record<string, string>, resolveFrom: string):
     return null;
   }
 
-  return {
-    name: 'module-alias',
-    resolveId: {
-      order: 'pre',
-      async handler(id, _importer, options) {
-        const target = alias[id];
-        if (!target) {
-          return null;
-        }
-
-        const resolved = await this.resolve(target, resolveFrom, {
-          ...options,
-          skipSelf: true,
-        });
+  const plugin = rollupAlias({
+    entries: entries.map(([specifier, target]) => ({
+      find: exactMatch(specifier),
+      replacement: target,
+      customResolver: async function (id, _importer, options) {
+        const resolved = await this.resolve(id, resolveFrom, options);
 
         if (!resolved) {
           throw new MastraError({
@@ -28,15 +25,24 @@ export function moduleAlias(alias: Record<string, string>, resolveFrom: string):
             domain: ErrorDomain.DEPLOYER,
             category: ErrorCategory.USER,
             details: {
-              alias: id,
+              alias: specifier,
               target,
             },
-            text: `Could not resolve deployer alias \`${id}\` to \`${target}\`.`,
+            text: `Could not resolve deployer alias \`${specifier}\` to \`${target}\`.`,
           });
         }
 
         return resolved;
       },
+    })),
+  });
+
+  return {
+    ...plugin,
+    name: 'module-alias',
+    resolveId: {
+      order: 'pre',
+      handler: plugin.resolveId as ResolveIdHook,
     },
   };
 }
