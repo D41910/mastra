@@ -84,7 +84,11 @@ export const OBSERVATION_CONTEXT_INSTRUCTIONS = `IMPORTANT: When responding, ref
 
 KNOWLEDGE UPDATES: When asked about current state (e.g., "where do I currently...", "what is my current..."), always prefer the MOST RECENT information. Observations include dates - if you see conflicting information, the newer observation supersedes the older one. Look for phrases like "will start", "is switching", "changed to", "moved to" as indicators that previous information has been updated.
 
-USER STATEMENTS VS ASSISTANT SUGGESTIONS: Treat what the user said about their own life, plans, decisions, and dates as authoritative, unless data or their own later messages say otherwise. Treat what the assistant said, such as proposed schedules, example dates, and recommendations, as suggestions rather than facts about what happened, unless the user adopted or confirmed them.
+USER STATEMENTS VS ASSISTANT SUGGESTIONS: Treat what the user said about their own life, plans, decisions, and dates as authoritative, unless data or their own later messages say otherwise. Treat what the assistant said, such as proposed schedules, example dates, and recommendations, as suggestions rather than facts about what happened, unless the user adopted or confirmed them. What the assistant did, such as editing a file, running a command, or calling a tool, is a record of what happened.
+
+SOURCES: When asked what a specific person, video, document, or policy said, or why something was decided, the assistant's own explanations are not that source. If your memory only holds the assistant's explanation, say that the source's content wasn't recorded, and present any suggestions as your own rather than as the source's.
+
+PREFERENCES: When the user has chosen, liked, or ruled something out, follow that in your recommendations unless they ask for alternatives. Mention a concern once rather than overriding their preference.
 
 PLANNED ACTIONS: If the user stated they planned to do something (e.g., "I'm going to...", "I'm looking forward to...", "I will...") and the date they planned to do it is now in the past (check the relative time like "3 weeks ago"), assume they completed the action unless there's evidence they didn't. For example, if someone said "I'll start my new diet on Monday" and that was 2 weeks ago, assume they started the diet.
 
@@ -205,6 +209,8 @@ Groups marked \`kind="reflection"\` (rendered as \`_kind: reflection_\`) are los
 - You want to **verify or expand on** an observation before responding
 - The answer depends on historical dates, order, or duration: verify both event dates and that they refer to the events the user means. Distinguish a plan, an actual start, a later update, and a repeated mention instead of choosing a nearby date from a summary
 - An observation records something the assistant proposed, such as a schedule, date, or plan, and your observations don't show what the user decided. Read the raw messages around it to find the user's decision before treating the proposal as what happened
+- You're about to recommend or advise, and the user may have chosen, liked, or ruled out options before. Look up their earlier choices; condensed observations often drop preferences
+- The question asks for a total, count, or combination across sessions. Look up each part separately, with different wordings, and check that you have every instance before adding them up
 - Relevant details are missing, ambiguous, or conflicting in the current observations${
     isResource
       ? `
@@ -245,7 +251,7 @@ If a single part is larger than the token budget, the \`partIndex\` result is \`
 
 ### When recall is NOT needed
 - The user is asking for a high-level summary and your observations already cover it
-- The question is about general preferences or facts that don't require source text
+- The question is general knowledge that doesn't depend on this user's history
 - The necessary original evidence is already visible, unambiguous, and not contradicted by other observations; do not repeat a lookup just to call the tool
 
 Observation groups with range IDs and your recall tool allows you to think back and remember details you're fuzzy on.`;

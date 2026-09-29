@@ -16,6 +16,32 @@ describe('who said it', () => {
     expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain('unless the user adopted or confirmed them');
   });
 
+  it("treats the assistant's actions as what happened, but not its explanations as another source", () => {
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain(
+      'What the assistant did, such as editing a file, running a command, or calling a tool, is a record of what happened.',
+    );
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain("the assistant's own explanations are not that source");
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain("say that the source's content wasn't recorded");
+  });
+
+  it('follows established preferences instead of overriding them', () => {
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain(
+      'follow that in your recommendations unless they ask for alternatives',
+    );
+    expect(OBSERVATION_CONTEXT_INSTRUCTIONS).toContain(
+      'Mention a concern once rather than overriding their preference',
+    );
+  });
+
+  it.each(['thread', 'resource'] as const)('sends recommendations and totals to recall in %s scope', scope => {
+    for (const text of [getRetrievalInstructions(scope), getRetrievalInstructions(scope, undefined, false)]) {
+      expect(text).toContain("You're about to recommend or advise");
+      expect(text).toContain('Look up their earlier choices');
+      expect(text).toContain('Look up each part separately');
+      expect(text).not.toContain('general preferences or facts');
+    }
+  });
+
   it.each(['thread', 'resource'] as const)(
     'sends unconfirmed assistant proposals to raw messages in %s scope',
     scope => {
