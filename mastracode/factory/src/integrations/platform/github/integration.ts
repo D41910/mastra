@@ -5,6 +5,11 @@ import type { MastraWorker } from '@mastra/core/worker';
 import { Octokit } from '@octokit/rest';
 import type { Context } from 'hono';
 
+import {
+  appendArtifactAttributionFooter,
+  appendPullRequestAttribution,
+  requireFactoryArtifactAttribution,
+} from '../../../capabilities/artifact-attribution.js';
 import type { IntegrationConnection } from '../../../capabilities/connection.js';
 import type {
   CreateIntakeCommentInput,
@@ -1218,12 +1223,13 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     requireGithubConnection(input.connection);
     const repository = requireSource(input.sourceId, 'GitHub Intake requires a repository source.');
     const issueNumber = requirePositiveId(input.issueId, 'issue');
+    const attribution = requireFactoryArtifactAttribution(input.attribution);
     try {
       const comment = await this.#client.request<GithubComment>(
         'POST',
         repositoryPath(repository, `issues/${issueNumber}/comments`),
-        { body: input.body },
-        { actingUserId: input.actingUserId },
+        { body: appendArtifactAttributionFooter(input.body, attribution) },
+        { actingUserId: input.actingUserId, factoryAttributionApplied: true },
       );
       this.#observeSelfAuthor(comment, input.actingUserId);
       return { id: String(comment.id), url: comment.htmlUrl };
@@ -1273,10 +1279,10 @@ export class PlatformGithubIntegration implements FactoryIntegration {
         head: input.headBranch,
         base: input.baseBranch,
         title: input.title,
-        body: input.body,
+        body: appendPullRequestAttribution(input.body, input.attribution),
         draft: input.draft,
       },
-      { actingUserId: input.actingUserId },
+      { actingUserId: input.actingUserId, factoryAttributionApplied: true },
     );
     const created = parsePullRequest(result);
     if (input.actingUserId && input.connection.type === 'app-installation') {
@@ -1319,11 +1325,17 @@ export class PlatformGithubIntegration implements FactoryIntegration {
       pullRequestPath(input, input.pullRequestId),
       {
         title: input.title,
-        body: input.body === null ? '' : input.body,
+        body:
+          input.body === undefined
+            ? undefined
+            : appendPullRequestAttribution(input.body === null ? '' : input.body, input.attribution),
         base: input.baseBranch,
         state: input.state,
       },
-      { actingUserId: input.actingUserId },
+      {
+        actingUserId: input.actingUserId,
+        ...(input.attribution ? { factoryAttributionApplied: true } : {}),
+      },
     );
     return parsePullRequest(result);
   }
@@ -1353,8 +1365,8 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const comment = await this.#client.request<GithubComment>(
       'POST',
       repositoryPath(input.sourceId, `issues/${requirePositiveId(input.pullRequestId, 'pull request')}/comments`),
-      { body: input.body },
-      { actingUserId: input.actingUserId },
+      { body: appendArtifactAttributionFooter(input.body, input.attribution) },
+      { actingUserId: input.actingUserId, factoryAttributionApplied: true },
     );
     this.#observeSelfAuthor(comment, input.actingUserId);
     return parseComment(comment);
@@ -1365,8 +1377,8 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const comment = await this.#client.request<GithubComment>(
       'PATCH',
       repositoryPath(input.sourceId, `issues/comments/${requirePositiveId(input.commentId, 'comment')}`),
-      { body: input.body },
-      { actingUserId: input.actingUserId },
+      { body: appendArtifactAttributionFooter(input.body, input.attribution) },
+      { actingUserId: input.actingUserId, factoryAttributionApplied: true },
     );
     return parseComment(comment);
   }
@@ -1411,8 +1423,12 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const review = await this.#client.request<GithubReview>(
       'POST',
       `${pullRequestPath(input, input.pullRequestId)}/reviews`,
-      { body: input.body, commitId: input.commitId, event: input.event ? reviewEvent(input.event) : undefined },
-      { actingUserId: input.actingUserId },
+      {
+        body: appendArtifactAttributionFooter(input.body, input.attribution),
+        commitId: input.commitId,
+        event: input.event ? reviewEvent(input.event) : undefined,
+      },
+      { actingUserId: input.actingUserId, factoryAttributionApplied: true },
     );
     return parseReview(review);
   }
@@ -1421,8 +1437,11 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const review = await this.#client.request<GithubReview>(
       'PUT',
       `${pullRequestPath(input, input.pullRequestId)}/reviews/${requirePositiveId(input.reviewId, 'review')}`,
-      { body: input.body },
-      { actingUserId: input.actingUserId },
+      { body: appendArtifactAttributionFooter(input.body, input.attribution) },
+      {
+        actingUserId: input.actingUserId,
+        ...(input.attribution ? { factoryAttributionApplied: true } : {}),
+      },
     );
     return parseReview(review);
   }
@@ -1431,8 +1450,8 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const review = await this.#client.request<GithubReview>(
       'POST',
       `${pullRequestPath(input, input.pullRequestId)}/reviews/${requirePositiveId(input.reviewId, 'review')}/events`,
-      { body: input.body, event: reviewEvent(input.event) },
-      { actingUserId: input.actingUserId },
+      { body: appendArtifactAttributionFooter(input.body, input.attribution), event: reviewEvent(input.event) },
+      { actingUserId: input.actingUserId, factoryAttributionApplied: true },
     );
     return parseReview(review);
   }
@@ -1441,8 +1460,11 @@ export class PlatformGithubIntegration implements FactoryIntegration {
     const review = await this.#client.request<GithubReview>(
       'PUT',
       `${pullRequestPath(input, input.pullRequestId)}/reviews/${requirePositiveId(input.reviewId, 'review')}/dismissals`,
-      { message: input.message },
-      { actingUserId: input.actingUserId },
+      { message: appendArtifactAttributionFooter(input.message, input.attribution) },
+      {
+        actingUserId: input.actingUserId,
+        ...(input.attribution ? { factoryAttributionApplied: true } : {}),
+      },
     );
     return parseReview(review);
   }
@@ -1471,13 +1493,16 @@ export class PlatformGithubIntegration implements FactoryIntegration {
   async #createReviewComment(input: CreateReviewCommentInput) {
     let body: Record<string, unknown>;
     if (input.replyToId !== undefined) {
-      body = { body: input.body, replyToId: requirePositiveId(input.replyToId, 'review comment') };
+      body = {
+        body: appendArtifactAttributionFooter(input.body, input.attribution),
+        replyToId: requirePositiveId(input.replyToId, 'review comment'),
+      };
     } else {
       if (!input.commitId || !input.path || input.line === undefined || !input.side) {
         throw new Error('A review comment requires commitId, path, line, and side unless it is a reply.');
       }
       body = {
-        body: input.body,
+        body: appendArtifactAttributionFooter(input.body, input.attribution),
         commitId: input.commitId,
         path: input.path,
         line: input.line,
@@ -1491,7 +1516,7 @@ export class PlatformGithubIntegration implements FactoryIntegration {
         'POST',
         `${pullRequestPath(input, input.pullRequestId)}/comments`,
         body,
-        { actingUserId: input.actingUserId },
+        { actingUserId: input.actingUserId, factoryAttributionApplied: true },
       ),
     );
   }
@@ -1502,8 +1527,8 @@ export class PlatformGithubIntegration implements FactoryIntegration {
       await this.#client.request<GithubReviewComment>(
         'PATCH',
         repositoryPath(input.sourceId, `pulls/comments/${requirePositiveId(input.commentId, 'review comment')}`),
-        { body: input.body },
-        { actingUserId: input.actingUserId },
+        { body: appendArtifactAttributionFooter(input.body, input.attribution) },
+        { actingUserId: input.actingUserId, factoryAttributionApplied: true },
       ),
     );
   }

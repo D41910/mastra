@@ -5,9 +5,19 @@ import type { WorkspaceSandbox } from '@mastra/core/workspace';
 import { z } from 'zod';
 
 import { getFactoryAuthOrgId, getFactoryAuthUserFromContext, getFactoryAuthUserId } from '../auth.js';
+import {
+  commitCoAuthor,
+  resolveFactoryArtifactAttribution,
+  type FactoryArtifactSession,
+  type FactoryArtifactTrigger,
+} from '../capabilities/artifact-attribution.js';
 import type { VersionControl } from '../capabilities/version-control.js';
 import type { IntegrationTools } from '../integrations/base.js';
-import { pushRepositoryBranch, refreshMergeRequestCheckout } from '../integrations/github/sandbox.js';
+import {
+  addCommitCoAuthorBeforePush,
+  pushRepositoryBranch,
+  refreshMergeRequestCheckout,
+} from '../integrations/github/sandbox.js';
 import type { ExecutableSandbox } from '../sandbox/materialization.js';
 import { resolveSessionWorkdir } from '../sandbox/session-sandbox.js';
 import type { AuditAgentEmitter } from '../storage/domains/audit/domain.js';
@@ -22,6 +32,8 @@ import { mergeRequestNumberFromBranch } from '../work-item-branch.js';
 type RepositorySessionState = {
   factoryProjectId?: string;
   projectRepositoryId?: string;
+  factoryWorkItemId?: string;
+  factoryRole?: string;
 };
 
 export interface SourceControlToolProvider {
@@ -149,6 +161,24 @@ export function createSourceControlTools({
     })),
     actingUserId: target.userId,
   });
+  const attributedReference = async (target: SessionTarget) => {
+    const trustedSession = requestContext.get('factoryArtifactSession') as FactoryArtifactSession | undefined;
+    return {
+      ...(await reference(target)),
+      attribution: resolveFactoryArtifactAttribution({
+        user: getFactoryAuthUserFromContext(requestContext),
+        userId: target.userId,
+        trigger: requestContext.get('factoryArtifactTrigger') as FactoryArtifactTrigger | undefined,
+        session:
+          trustedSession ??
+          ({
+            role: target.context.getState().factoryRole ?? target.context.session.modeId ?? 'session',
+            workItemRef: target.context.getState().factoryWorkItemId ?? target.context.resourceId,
+            runId: target.context.threadId ?? target.context.resourceId,
+          } satisfies FactoryArtifactSession),
+      }),
+    };
+  };
 
   return {
     source_control_refresh_change_request_checkout: createTool({
@@ -198,6 +228,8 @@ export function createSourceControlTools({
           orgId: target.orgId,
           repositoryId: target.repository.id,
         });
+        const ref = await attributedReference(target);
+        await addCommitCoAuthorBeforePush(sandbox, workdir, commitCoAuthor(ref.attribution));
         await pushRepositoryBranch(sandbox, workdir, target.session.branch, access, target.repository.slug);
         await emitAgentAudit(audit, requestContext, {
           action: 'factory.agent.push',
@@ -245,7 +277,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         const created = await target.provider.versionControl.createPullRequest({
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           title: input.title,
           ...(input.body !== undefined ? { body: input.body } : {}),
           baseBranch: target.session.baseBranch,
@@ -275,7 +307,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         return target.provider.versionControl.updatePullRequest({
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           pullRequestId: changeRequestId(input.changeRequestId),
           ...(input.title !== undefined ? { title: input.title } : {}),
           ...(input.body !== undefined ? { body: input.body } : {}),
@@ -291,7 +323,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         return target.provider.versionControl.createComment({
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           pullRequestId: changeRequestId(input.changeRequestId),
           body: input.body,
         });
@@ -317,7 +349,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         return target.provider.versionControl.updateComment({
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           commentId: input.commentId,
           body: input.body,
         });
@@ -385,7 +417,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         const base = {
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           pullRequestId: changeRequestId(input.changeRequestId),
           body: input.body,
         };
@@ -419,7 +451,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         return target.provider.versionControl.updateReviewComment({
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           commentId: input.commentId,
           body: input.body,
         });
@@ -477,7 +509,7 @@ export function createSourceControlTools({
       execute: async input => {
         const target = await withTarget();
         const base = {
-          ...(await reference(target)),
+          ...(await attributedReference(target)),
           pullRequestId: changeRequestId(input.changeRequestId),
           ...(input.commitId !== undefined ? { commitId: input.commitId } : {}),
         };
