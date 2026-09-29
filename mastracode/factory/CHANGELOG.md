@@ -1,5 +1,11 @@
 # @mastra/factory
 
+## 0.18.0-alpha.10
+
+### Patch Changes
+
+- Fixed missing Slack feedback when Factory message preparation fails before dispatch. ([#25362](https://github.com/mastra-ai/mastra/pull/25362))
+
 ## 0.18.0-alpha.9
 
 ### Patch Changes
