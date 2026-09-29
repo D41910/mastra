@@ -46,11 +46,11 @@ interface KVNamespaceBinding {
 }
 
 export class CloudflareDeployer extends Deployer {
-  readonly userConfig: Omit<Unstable_RawConfig, 'main' | '$schema'>;
+  readonly userConfig: Omit<Unstable_RawConfig, 'main' | '$schema' | 'alias'>;
 
   constructor(
-    userConfig: Omit<Unstable_RawConfig, 'main' | '$schema'> &
-      // TODO: Remove deprecated fields in next major version, and update type to just Omit<Unstable_RawConfig, 'main' | '$schema'>.
+    userConfig: Omit<Unstable_RawConfig, 'main' | '$schema' | 'alias'> &
+      // TODO: Remove deprecated fields in next major version, and update type to just Omit<Unstable_RawConfig, 'main' | '$schema' | 'alias'>.
       {
         /** @deprecated Use `name` instead. */
         projectName?: string;
