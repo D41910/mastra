@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { AgentChannels, resolveWaitUntil } from '@mastra/core/channels';
 import type {
   ChannelAdapterConfig,
@@ -226,11 +226,11 @@ export class TelegramProvider implements ChannelProvider {
     // at every connect() site.
     const botToken = options.botToken ?? this.#config.botToken;
     if (!botToken) {
-      const installationId = existing?.id ?? randomUUID();
+      const installationId = existing?.id ?? globalThis.crypto.randomUUID();
       await store.save({
         id: installationId,
         agentId,
-        webhookId: existing?.webhookId ?? randomUUID(),
+        webhookId: existing?.webhookId ?? globalThis.crypto.randomUUID(),
         status: 'pending',
         installedAt: existing?.installedAt ?? new Date(),
       });
@@ -261,8 +261,8 @@ export class TelegramProvider implements ChannelProvider {
         }
       }
       const me = await getMe(botToken, this.#apiBaseUrl());
-      const installationId = existing?.id ?? randomUUID();
-      const webhookId = existing?.webhookId ?? randomUUID();
+      const installationId = existing?.id ?? globalThis.crypto.randomUUID();
+      const webhookId = existing?.webhookId ?? globalThis.crypto.randomUUID();
       const webhookUrl = mode === 'webhook' ? `${baseUrl}/${PLATFORM}/events/${webhookId}` : undefined;
       const commands = normalizeCommands(options.commands ?? this.#config.commands ?? DEFAULT_COMMANDS);
       const installation: TelegramInstallation = {
