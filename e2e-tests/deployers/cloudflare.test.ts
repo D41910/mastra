@@ -55,6 +55,21 @@ describe.for([['pnpm'] as const])(`%s cloudflare deployer`, ([pkgManager]) => {
       expect(res.status).toBe(200);
       expect(body).toEqual({ valid: true, value: { city: 'Utrecht' } });
     });
+
+    it.each([
+      ['a non-string city', { city: 42 }],
+      ['an unexpected property', { city: 'Utrecht', country: 'Netherlands' }],
+    ])('should reject JSON Schema input containing %s', async (_description, value) => {
+      const res = await fetch(`http://localhost:${port}/json-schema-validation`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(value),
+      });
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body).toEqual({ valid: false, issues: expect.any(String) });
+    });
   }
 
   describe('wrangler dev', async () => {
