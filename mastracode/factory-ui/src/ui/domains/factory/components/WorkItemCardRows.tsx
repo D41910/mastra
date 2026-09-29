@@ -7,7 +7,13 @@ import type { ReactNode } from 'react';
 
 import type { BoardCardStatus } from '../boardCardStatus';
 import type { CardAction } from '../cardPrimaryAction';
-import { metadataLabelColors, metadataLabels, pullRequestStatusForItem, workItemMeta } from '../boardItems';
+import {
+  artifactIdentityLine,
+  metadataLabelColors,
+  metadataLabels,
+  pullRequestStatusForItem,
+  workItemMeta,
+} from '../boardItems';
 import { itemStageLabel } from '../boardStages';
 import type { AuditActorProfile } from '../services/audit';
 import type { WorkItem } from '../services/workItems';
@@ -51,6 +57,7 @@ export function WorkItemCardRows({
   const labelColors = metadataLabelColors(item.metadata);
   const otherStages = item.stages.filter(stage => stage !== columnStage);
   const external = knownExternalAuthor(item);
+  const artifactIdentity = artifactIdentityLine(item, actors);
 
   return (
     <>
@@ -81,6 +88,7 @@ export function WorkItemCardRows({
         </div>
       </div>
       <CardLabels labels={labels} colors={labelColors} />
+      {artifactIdentity && <p className="text-meta text-muted-foreground truncate">{artifactIdentity}</p>}
       {otherStages.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {otherStages.map(stage => (
